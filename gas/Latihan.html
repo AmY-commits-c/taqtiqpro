@@ -1,0 +1,607 @@
+<script>
+/* Latihan taqti' pelajar — jadual كتابة عروضية / تقطيع / تفعيلة / حال، dengan bantuan semak (pilihan). */
+(function () {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const A = () => window.ArudApp;
+
+  // Nama taf'ilah (tanpa baris) → corak /0 yang sah (1 = mutaharrik '/', 0 = sakin '0')
+  const NAME_PAT = {
+    'فعولن': ['11010'], 'فعول': ['1101', '1100'], 'فعو': ['110'], 'فع': ['10', '11'], 'فعل': ['101', '100', '110'],
+    'فعلن': ['1110', '1010'], 'مفاعيلن': ['1101010'], 'مفاعلن': ['110110'], 'مفاعيل': ['110101'],
+    'مستفعلن': ['1010110'], 'متفعلن': ['110110', '101110'], 'مفتعلن': ['101110'], 'فعلتن': ['111110'], 'مفعولن': ['101010'],
+    'مستفعلان': ['10101100'], 'مستفعل': ['101010', '110101'], 'متفعل': ['11010', '110101'],
+    'متفاعلن': ['1110110', '1010110'], 'متفاعل': ['111010', '101010'], 'متفا': ['1110', '1010'],
+    'متفاعلان': ['11101100', '10101100'], 'متفاعلاتن': ['111011010', '101011010'],
+    'مفاعلتن': ['1101110', '1101010'], 'مفاعتن': ['110110'], 'مفاعلت': ['110101'], 'مفاعل': ['11010', '11011'],
+    'فاعلن': ['10110'], 'مفاعي': ['11010'], 'فاعلان': ['101100'], 'فعلان': ['11100'], 'فالن': ['1010'],
+    'فاعلاتن': ['1011010'], 'فعلاتن': ['111010'], 'فاعلات': ['101101', '101100'], 'فعلات': ['11101', '11100'],
+    'فاعلا': ['10110'], 'فعلا': ['1110'], 'فاعلاتان': ['10110100'], 'فالاتن': ['101010'], 'فاعل': ['1010', '1011'],
+    'مفعولات': ['1010101', '101010'], 'معولات': ['110101'], 'مفعلات': ['101101', '101100'], 'معلات': ['11101'],
+    'مفعولا': ['101010'], 'مفعلا': ['10110'], 'معلا': ['1110'], 'مفعو': ['1010']
+  };
+  const TAF_LIST = ['فعولن', 'فعولُ', 'فعولْ', 'فعو', 'مفاعيلن', 'مفاعلن', 'مفاعيلُ', 'مستفعلن', 'متفعلن', 'مفتعلن', 'فعلتن', 'مفعولن',
+    'متفاعلن', 'مُتْفاعلن', 'متفاعلْ', 'مفاعلتن', 'مفاعَلْتن', 'فاعلن', 'فعِلن', 'فعْلن', 'فاعلاتن', 'فعِلاتن', 'فاعلاتُ', 'مفعولاتُ', 'مستفع لن', 'فاع لاتن'];
+  const HAL_LIST = ['سالمة', 'صحيحة', 'مقبوضة', 'مخبونة', 'مطوية', 'مخبولة', 'مكفوفة', 'مشكولة', 'مضمرة', 'موقوصة', 'مخزولة', 'معصوبة',
+    'معقولة', 'منقوصة', 'محذوفة', 'مقطوفة', 'مقطوعة', 'مقصورة', 'مقطوعة مخبونة', 'مقطوعة مضمرة', 'محذوفة مخبونة', 'مذيلة', 'مرفلة',
+    'مسبغة', 'حذاء', 'حذاء مضمرة', 'أبتر', 'أثلم', 'أثرم', 'مشعثة', 'مكسوفة', 'موقوفة', 'أصلم'];
+
+  let S = null;      // keadaan latihan semasa
+  let activeTq = null;
+  let SET = null;    // { set, idx, nama, kelas, results:[], submitted:false }
+  let PAINT = true;  // false = semak tanpa mewarnakan (set tanpa bantuan)
+  const helpOn = () => SET ? SET.set.Bantuan !== 'Tidak' : $('#lxHelp').checked;
+
+  const N = s => A().norm(s);
+  function halKey(s) {
+    return String(s || '').replace(/[ً-ْٰ]/g, '').replace(/\(.*?\)/g, ' ').trim().split(/\s+/).filter(Boolean).map(w => {
+      w = w.replace(/^ال/, '').replace(/[أإآ]/g, 'ا').replace(/ة$/, '');
+      if (w === 'سالم' || w === 'صحيح') return 'صحيح';
+      if (w === 'حذاء' || w === 'احذ') return 'احذ';
+      return w;
+    }).sort().join(' ');
+  }
+  function arudiKey(s) {
+    return String(s || '').replace(/[ً-ْٰـ]/g, '').replace(/[أإآءؤئٱ]/g, 'ا').replace(/ى/g, 'ا')
+      .replace(/ة/g, 'ت').replace(/[^ء-ي]/g, '').replace(/(.)\1+/g, '$1');
+  }
+  const realFeet = sh => (sh && sh.feet ? sh.feet.filter(f => f.status !== 'extra_bits' && f.status !== 'missing') : []);
+
+  /* ───────────── Pilihan syair ───────────── */
+  function sourceRows() {
+    const D = A().D, src = $('#lxSumber').value, b = $('#lxBahar').value;
+    const bank = (D.bank || []).filter(r => r.Status !== 'Ditolak');
+    const rows = src === 'rujukan' ? D.rujukan : src === 'bank' ? bank : (D.rujukan || []).concat(bank);
+    const onlySure = $('#lxHelp').checked && !$('#lxAll').checked;
+    return rows.filter(r => (!b || String(r.Bahar || '').trim() === b) && (!onlySure || fullySure(r)));
+  }
+  const SURE_CACHE = {};
+  function fullySure(r) {
+    if (r.ID in SURE_CACHE) return SURE_CACHE[r.ID];
+    let ok = false;
+    try { const res = ArudJS.processPoem(A().parseVerses(r.Teks)); ok = !res.error && res.verses.every(v => [v.sadr, v.ajuz].filter(Boolean).every(sh => realFeet(sh).every(f => f.status === 'ok'))); } catch (e) { ok = false; }
+    return (SURE_CACHE[r.ID] = ok);
+  }
+  function fillSyairList() {
+    const rows = sourceRows();
+    $('#lxSyair').innerHTML = rows.length ? rows.map(r => {
+      const first = A().parseVerses(r.Teks)[0] || ['', ''];
+      return '<option value="' + A().esc(r.ID) + '">' + A().esc(r.ID + ' — ' + first[0].split(/\s+/).slice(0, 5).join(' ') + (fullySure(r) ? '' : '  ⚠')) + '</option>';
+    }).join('') : '<option value="">(tiada syair)</option>';
+    fillBaitList();
+  }
+  function currentRow() { const id = $('#lxSyair').value; return sourceRows().find(r => r.ID === id); }
+  function fillBaitList() {
+    const r = currentRow(); const vs = r ? A().parseVerses(r.Teks) : [];
+    $('#lxBait').innerHTML = vs.map((v, i) => '<option value="' + i + '">Bait ' + (i + 1) + '</option>').join('');
+    $('#lxBaitWrap').classList.toggle('hidden', vs.length < 2);
+  }
+  function pickRandom() {
+    const rows = sourceRows(); if (!rows.length) return;
+    const r = rows[Math.floor(Math.random() * rows.length)];
+    $('#lxSyair').value = r.ID; fillBaitList();
+    const n = A().parseVerses(r.Teks).length; $('#lxBait').value = String(Math.floor(Math.random() * n));
+  }
+  function setMode(m) {
+    $$('#lxMode button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === m)));
+    $('#lxSys').classList.toggle('hidden', m !== 'sistem'); $('#lxSysNote').classList.toggle('hidden', m !== 'sistem'); $('#lxOwn').classList.toggle('hidden', m !== 'sendiri');
+    $('#lxSetPanel').classList.toggle('hidden', m !== 'set');
+    $('#lxHelpWrap').classList.toggle('hidden', m === 'set');
+    $('#lxStart').textContent = m === 'set' ? 'Mula set' : 'Mula latihan';
+    setStartState(m === 'set' ? intakeValid() : true);
+    if (m !== 'set' && SET) { SET = null; $('#lxSheet').classList.add('hidden'); }
+    if (m === 'set') { fillSetList(); if (!SET) $('#lxSheet').classList.add('hidden'); }
+    syncSetUI();
+  }
+  const modeNow = () => ($('#lxMode button[aria-pressed="true"]') || {}).dataset.m || 'sistem';
+
+  /* ───────────── Mula latihan ───────────── */
+  function start() {
+    if (modeNow() === 'set') return startSet();
+    let verse;
+    if (modeNow() === 'sendiri') {
+      const vs = A().parseVerses($('#lxOwnText').value);
+      if (!vs.length) { A().toast('Tulis satu bait dahulu (sadr # ajuz).', true); return; }
+      verse = vs[0];
+    } else {
+      const r = currentRow(); if (!r) { A().toast('Pilih syair dahulu.', true); return; }
+      verse = A().parseVerses(r.Teks)[Number($('#lxBait').value) || 0];
+    }
+    startVerse(verse);
+  }
+  function analyseVerse(verse) {
+    const res = ArudJS.processPoem([verse]);
+    const ok = !res.error;
+    const d = ok ? A().describe(res, [verse]) : null;
+    const v = ok ? res.verses[0] : null;
+    const sF = ok ? realFeet(v.sadr) : [], aF = ok && verse[1] ? realFeet(v.ajuz) : [];
+    return { res, d, v, sF, aF, sure: ok && sF.concat(aF).every(f => f.status === 'ok') };
+  }
+  function startVerse(verse) {
+    const res = ArudJS.processPoem([verse]);
+    const ok = !res.error;
+    const d = ok ? A().describe(res, [verse]) : null;
+    const v = ok ? res.verses[0] : null;
+    const sF = ok ? realFeet(v.sadr) : [], aF = ok && verse[1] ? realFeet(v.ajuz) : [];
+    S = { verse, res, d, v, exp: { sadr: sF, ajuz: aF }, cols: { sadr: sF.length || 3, ajuz: verse[1] ? (aF.length || 3) : 0 }, checked: false };
+    renderSheet();
+    $('#lxAnsBahar').value = ''; $('#lxAnsLaqob').value = '';
+    $$('#lxAnsBahar, #lxAnsLaqob').forEach(x => { x.closest('label').className = 'f'; });
+    $('#lxSheet').classList.remove('hidden');
+    $('#lxSheet').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function cellsFor(part, n) {
+    const out = { arudi: [], tq: [], taf: [], hal: [] };
+    for (let i = 0; i < n; i++) {
+      out.arudi.push('<td data-row="arudi" data-part="' + part + '" data-i="' + i + '"><input class="ws-in" dir="rtl" aria-label="كتابة عروضية ' + (i + 1) + '"></td>');
+      out.tq.push('<td data-row="tq" data-part="' + part + '" data-i="' + i + '"><div class="tq" tabindex="0" role="textbox" aria-label="تقطيع ' + (i + 1) + '" data-v=""></div></td>');
+      out.taf.push('<td data-row="taf" data-part="' + part + '" data-i="' + i + '"><input class="ws-in" dir="rtl" list="dlTaf" aria-label="تفعيلة ' + (i + 1) + '"></td>');
+      out.hal.push('<td data-row="hal" data-part="' + part + '" data-i="' + i + '"><input class="ws-in" dir="rtl" list="dlHal" aria-label="حال ' + (i + 1) + '"></td>');
+    }
+    return out;
+  }
+  function renderSheet() {
+    const esc = A().esc, help = helpOn();
+    const [s, a] = S.verse;
+    $('#lxVerse').innerHTML = A().renderPoem(a ? s + ' # ' + a : s);
+    const sc = cellsFor('sadr', S.cols.sadr), ac = cellsFor('ajuz', S.cols.ajuz);
+    const ctl = part => '<span class="colctl"><button type="button" class="btn small ghost" data-col="' + part + '" data-d="-1" aria-label="Kurangkan taf\'ilah">−</button>' +
+      '<button type="button" class="btn small ghost" data-col="' + part + '" data-d="1" aria-label="Tambah taf\'ilah">+</button></span>';
+    const rows = [['arudi', 'كتابة عروضية'], ['tq', 'تقطيع'], ['taf', 'تفعيلة'], ['hal', 'حال/نوع']];
+    const narrow = window.matchMedia && window.matchMedia('(max-width:760px)').matches;
+    const table = parts => '<table class="ws"><thead><tr><th class="rowhead"></th>' +
+      parts.map((p, k) => (k ? '<th class="gap"></th>' : '') + '<th colspan="' + S.cols[p.part] + '">' + p.label + ' ' + ctl(p.part) + '</th>').join('') + '</tr></thead><tbody>' +
+      rows.map(([key, label]) => '<tr><th class="rowhead" scope="row">' + label + '</th>' +
+        parts.map((p, k) => (k ? '<td class="gap" aria-hidden="true"></td>' : '') + p.cells[key].join('')).join('') + '</tr>').join('') + '</tbody></table>';
+    const P = [{ part: 'sadr', label: 'الصدر', cells: sc }].concat(a ? [{ part: 'ajuz', label: 'العجز', cells: ac }] : []);
+    S.narrow = narrow;
+    $('#lxTable').innerHTML = narrow ? P.map(p => table([p])).join('') : table(P);
+    $$('#lxTable [data-col]').forEach(b => b.addEventListener('click', () => {
+      const p = b.dataset.col; const keep = collect();
+      S.cols[p] = Math.max(1, Math.min(6, S.cols[p] + Number(b.dataset.d))); renderSheet(); restore(keep);
+    }));
+    $$('#lxTable .tq').forEach(el => {
+      el.addEventListener('focus', () => setActive(el));
+      el.addEventListener('click', () => el.focus());
+      el.addEventListener('keydown', onTqKey);
+    });
+    $$('#lxTable input').forEach(el => el.addEventListener('input', () => { updateProgress(); if (S.checked && help && !(SET && SET.submitted)) check(true); }));
+    $('#lxCheck').classList.toggle('hidden', !help || !!SET); $('#lxReveal').classList.toggle('hidden', !help || !!SET);
+    const sent = !!(SET && SET.submitted);
+    $('#lxSubmit').classList.toggle('hidden', !SET || sent); $('#lxNext').classList.toggle('hidden', !sent || !helpOn()); $('#lxSubmit').disabled = false;
+    renderSetBar();
+    const nUnsure = S.v ? S.exp.sadr.concat(S.exp.ajuz).filter(f => !sure(f)).length : 0;
+    const tasri = S.v && S.v.tasri ? '<div class="notice info">Bait ini <b>musarra\' (تصريع)</b>: \'arudh di hujung sadr mengikut bentuk dharb, jadi halnya sama dengan dharb.</div>' : '';
+    $('#lxWarn').innerHTML = (help ? tasri : '') + (!help ? '' : !S.v ? '<div class="notice">Sistem tidak dapat mentaqti\' bait ini, jadi semakan automatik tidak tersedia. Semak baris dan tanda #.</div>'
+      : nUnsure ? '<div class="notice">Sistem tidak pasti ' + nUnsure + ' taf\'ilah dalam bait ini, biasanya kerana ada huruf tanpa baris. Petak taf\'ilah itu akan ditanda <b>؟</b> dan tidak dinilai — rujuk guru untuk bahagian itu.</div>' : '');
+    $('#lxResult').innerHTML = ''; $('#lxCheer').innerHTML = '';
+    S.checked = false;
+    setTimeout(updateProgress, 0);
+    setActive($('#lxTable .tq'));
+  }
+  function collect() {
+    const o = {};
+    $$('#lxTable td[data-row]').forEach(td => {
+      const k = td.dataset.row + '|' + td.dataset.part + '|' + td.dataset.i;
+      o[k] = td.dataset.row === 'tq' ? $('.tq', td).dataset.v : $('input', td).value;
+    });
+    o.bahar = $('#lxAnsBahar').value; o.laqob = $('#lxAnsLaqob').value; return o;
+  }
+  function restore(o) {
+    $$('#lxTable td[data-row]').forEach(td => {
+      const v = o[td.dataset.row + '|' + td.dataset.part + '|' + td.dataset.i]; if (v == null) return;
+      if (td.dataset.row === 'tq') setTq($('.tq', td), v); else $('input', td).value = v;
+    });
+  }
+
+  function updateProgress() {
+    const tds = $$('#lxTable td[data-row]'); if (!tds.length) return;
+    const filled = tds.filter(td => td.dataset.row === 'tq' ? !!$('.tq', td).dataset.v : !!$('input', td).value.trim()).length;
+    $('#lxProgTxt').textContent = filled + ' / ' + tds.length + ' petak diisi';
+    $('#lxProgBar').style.width = Math.round(100 * filled / tds.length) + '%';
+  }
+
+  /* ───────────── Petak تقطيع: / dan 0 sahaja ───────────── */
+  function setTq(el, v) {
+    v = String(v || '').replace(/[^01]/g, '').slice(0, 10);
+    el.dataset.v = v;
+    el.innerHTML = v.split('').map(d => '<span>' + (d === '1' ? '/' : '0') + '</span>').join('') || '<span class="ph">/0</span>';
+    updateProgress();
+  }
+  function setActive(el) {
+    if (activeTq) activeTq.classList.remove('active');
+    activeTq = el || null; if (activeTq) activeTq.classList.add('active');
+  }
+  function typeTq(sym) {
+    if (!activeTq) return;
+    const v = activeTq.dataset.v || '';
+    if (sym === 'back') setTq(activeTq, v.slice(0, -1));
+    else if (sym === 'clear') setTq(activeTq, '');
+    else setTq(activeTq, v + sym);
+    if (S && S.checked && helpOn() && !(SET && SET.submitted)) check(true);
+  }
+  function onTqKey(e) {
+    const k = e.key;
+    if (['/', 'ظ', '1', '\\', '|'].includes(k)) { e.preventDefault(); setActive(e.currentTarget); typeTq('1'); }
+    else if (['0', '٠', 'o', 'O', 'ه'].includes(k)) { e.preventDefault(); setActive(e.currentTarget); typeTq('0'); }
+    else if (k === 'Backspace' || k === 'Delete') { e.preventDefault(); setActive(e.currentTarget); typeTq('back'); }
+    else if (k.length === 1) { e.preventDefault(); A().toast('Petak تقطيع hanya menerima / dan 0.', true); }
+  }
+
+  /* ───────────── Semak ───────────── */
+  const sure = f => f && f.status === 'ok';
+  const UNSURE_TIP = 'Sistem tidak pasti taf\'ilah ini (biasanya kerana baris syair tidak lengkap). Petak ini tidak dinilai — rujuk guru.';
+  function mark(td, st, tip) { if (!PAINT) return; td.classList.remove('ok', 'bad', 'warn', 'reveal', 'unsure'); if (st) td.classList.add(st); td.title = tip || ''; $$('.ans-hint', td).forEach(x => x.remove()); }
+  // Papar jawapan betul di bawah petak yang salah (hanya bila bantuan semak dibuka)
+  function showAns(td, html, unsure) { if (!PAINT || !html) return; td.insertAdjacentHTML('beforeend', '<span class="ans-hint' + (unsure ? ' ragu' : '') + '">' + (unsure ? '؟ ' : '✓ ') + html + '</span>'); }
+  const tqHtml = v => '<span class="tqa">' + String(v).split('').map(d => d === '1' ? '/' : '0').join('') + '</span>';
+  // Nama taf'ilah + nama ganti yang lazim (naql) untuk bentuk berillah
+  const TAF_ALT = { 'فاعلن|Qataa': 'فَاعِلْ / فَعْلُنْ', 'مستفعلن|Qataa': 'مُسْتَفْعِلْ / مَفْعُولُنْ', 'مستفعلن|KhabanAndQataa': 'مُتَفْعِلْ / فَعُولُنْ',
+    'متفاعلن|Qataa': 'مُتَفَاعِلْ / فَعِلَاتُنْ', 'متفاعلن|QataaAndEdmaar': 'مُتْفَاعِلْ / مَفْعُولُنْ', 'متفاعلن|Hathath': 'مُتَفَا / فَعِلُنْ', 'متفاعلن|HathathAndEdmaar': 'مُتْفَا / فَعْلُنْ',
+    'مفاعلتن|Qataf': 'مُفَاعَلْ / فَعُولُنْ', 'مفاعيلن|Hadhf': 'مَفَاعِي / فَعُولُنْ', 'فاعلاتن|Hadhf': 'فَاعِلَا / فَاعِلُنْ', 'فاعلاتن|HadhfAndKhaban': 'فَعِلَا / فَعِلُنْ',
+    'فاعلاتن|Batr': 'فَاعِلْ / فَعْلُنْ', 'مفعولات|Kasf': 'مَفْعُولَا / مَفْعُولُنْ', 'مفعولات|Salam': 'مَفْعُو / فَعْلُنْ', 'فعولن|Hadhf': 'فَعُو / فَعَلْ' };
+  function tafAns(f) {
+    const k = f.base_tafeela + '|' + f.zihaf_key;
+    return TAF_ALT[k] || (f.zihaf_key && A().FORM_NAME[k]) || (f.actual_name && f.actual_name.split(' / ').pop()) || f.base_tafeela;
+  }
+  const halAns = f => /^سالمة/.test(f.zihaf_name_ar || '') ? 'سالمة / صحيحة' : A().cleanZ(f.zihaf_name_ar);
+  /* Kitabah arudiyyah: setiap huruf = satu simbol taqti'. Syaddah = dua huruf. */
+  function arLetters(str) {
+    let out = '', last = '';
+    for (const ch of String(str || '').replace(/آ/g, 'ءا')) {
+      if (ch === '\u0651') { if (last) out += last; continue; }
+      if (ch === '\u0670') { last = 'ا'; out += 'ا'; continue; } // alif khanjariah dibaca
+      if (/[ء-يٱ]/.test(ch)) { last = ch; out += ch; }
+    }
+    return out;
+  }
+  const letterKey = str => arLetters(str).replace(/[أإءؤئٱ]/g, 'ا').replace(/ى/g, 'ا').replace(/ة/g, 'ت');
+  function sysFootTexts(part) {
+    const sys = part === 'sadr' ? S.v.sadr : S.v.ajuz, feet = S.exp[part] || [];
+    if (!sys || !feet.length) return null;
+    const n = feet.reduce((a, f) => a + f.actual_segment.length, 0);
+    let t = arLetters(sys.arudi_text);
+    if (t.length > n) t = t.replace(/([اويى])\1$/, '$1');        // isyba' berganda di hujung shatr
+    if (t.length > n) t = t.replace(/(.)\1\1/g, '$1$1');        // huruf berganda tiga
+    if (t.length > n) t = t.replace(/نى/g, 'ن');                // tanwin pada alif maqsurah
+    if (t.length !== n) return null;
+    const out = []; let k = 0;
+    feet.forEach(f => { out.push(t.slice(k, k + f.actual_segment.length)); k += f.actual_segment.length; });
+    return out;
+  }
+  function arudiHint(t, e, shatrOk) {
+    if (!t) return 'Petak ini kosong.';
+    if (shatrOk) return 'Ejaan betul, tetapi pecahan huruf ke petak taf\'ilah belum tepat — bilangan huruf setiap petak mesti sama dengan bilangan simbol taqti\'nya.';
+    if (t.length === e.length && t.slice(0, -1) === e.slice(0, -1) && 'اوي'.includes(e.slice(-1))) return 'Huruf isyba\' di hujung mesti ikut baris: dhammah → و، kasrah → ي، fathah → ا.';
+    if (t.length === e.length - 1) for (let k = 0; k < e.length - 1; k++) if (e[k] === e[k + 1] && t === e.slice(0, k) + e.slice(k + 1)) return 'Huruf bersyaddah ditulis dua kali (pertama sakin, kedua berbaris) — atau letak tanda syaddah.';
+    if (t.length !== e.length) return 'Bilangan huruf (' + t.length + ') tidak sama dengan bilangan simbol taqti\' taf\'ilah ini. Setiap huruf = satu / atau 0.';
+    return 'Ejaan berbeza. Semak: hamzah wasal & alif lam yang tidak dibaca, lam syamsiah (huruf digandakan), tanwin ditulis نْ, dan huruf yang dibaca tetapi tidak ditulis (هٰذا → هاذا).';
+  }
+  function check(silent) {
+    if (!S || !S.v) return;
+    S.checked = true;
+    const tally = { tq: [0, 0], taf: [0, 0], hal: [0, 0], unsure: 0 }, details = [];
+    ['sadr', 'ajuz'].forEach(part => {
+      const exp = S.exp[part]; if (!S.cols[part]) return;
+      for (let i = 0; i < S.cols[part]; i++) {
+        const f = exp[i];
+        const tdTq = $('#lxTable td[data-row="tq"][data-part="' + part + '"][data-i="' + i + '"]');
+        const tdTaf = $('#lxTable td[data-row="taf"][data-part="' + part + '"][data-i="' + i + '"]');
+        const tdHal = $('#lxTable td[data-row="hal"][data-part="' + part + '"][data-i="' + i + '"]');
+        const vTq = $('.tq', tdTq).dataset.v, vTaf = $('input', tdTaf).value.trim(), vHal = $('input', tdHal).value.trim();
+        if (!f) { // lebih lajur daripada jawapan
+          [tdTq, tdTaf, tdHal].forEach(td => mark(td, 'bad', 'Shatr ini tidak mempunyai taf\'ilah sebanyak ini.'));
+          continue;
+        }
+        if (!sure(f)) {
+          [tdTq, tdTaf, tdHal].forEach(td => mark(td, 'unsure', UNSURE_TIP)); tally.unsure++;
+          if (f.actual_segment && f.actual_segment !== 'MISSING') showAns(tdTq, tqHtml(f.actual_segment) + ' <small>(ragu)</small>', true);
+          continue;
+        }
+        tally.tq[1]++; tally.taf[1]++; tally.hal[1]++;
+        const det = { p: part, i, z: f.zihaf_key || 'NoZehafNorEllah', zn: A().cleanZ(f.zihaf_name_ar), b: f.base_tafeela, tq: 0, taf: 0, hal: 0 }; details.push(det);
+        if (vTq) { const ok = vTq === f.actual_segment; mark(tdTq, ok ? 'ok' : 'bad'); if (ok) { tally.tq[0]++; det.tq = 1; } else showAns(tdTq, tqHtml(f.actual_segment)); } else mark(tdTq, '');
+        if (vTaf) {
+          const pats = NAME_PAT[N(vTaf)] || [];
+          const formName = f.zihaf_key && A().FORM_NAME[f.base_tafeela + '|' + f.zihaf_key];
+          const ok = pats.includes(f.actual_segment) || (formName && N(formName) === N(vTaf));
+          mark(tdTaf, ok ? 'ok' : 'bad'); if (ok) { tally.taf[0]++; det.taf = 1; } else showAns(tdTaf, A().esc(tafAns(f)));
+        } else mark(tdTaf, '');
+        if (vHal) { const ok = halKey(vHal) === halKey(A().cleanZ(f.zihaf_name_ar)); mark(tdHal, ok ? 'ok' : 'bad'); if (ok) { tally.hal[0]++; det.hal = 1; } else showAns(tdHal, A().esc(halAns(f))); } else mark(tdHal, '');
+      }
+    });
+    // كتابة عروضية: semak setiap petak taf'ilah (jarak antara perkataan & sambung/pisah huruf diabaikan)
+    const arudiOk = {}, arudiNotes = [];
+    ['sadr', 'ajuz'].forEach(part => {
+      if (!S.cols[part]) return;
+      const tds = $$('#lxTable td[data-row="arudi"][data-part="' + part + '"]');
+      const vals = tds.map(td => $('input', td).value);
+      if (!vals.join('').trim()) { tds.forEach(td => mark(td, '')); return; }
+      if (!(S.exp[part] || []).every(sure)) { tds.forEach(td => mark(td, '')); return; } // sistem tidak pasti — tidak dinilai
+      const exp = sysFootTexts(part), sys = part === 'sadr' ? S.v.sadr : S.v.ajuz;
+      const shatrOk = letterKey(vals.join('')) === letterKey(exp ? exp.join('') : sys && sys.arudi_text);
+      if (!exp) { // teks sistem tidak dapat dipecah ikut taf'ilah — semak seluruh shatr sahaja
+        arudiOk[part] = shatrOk;
+        tds.forEach(td => mark(td, shatrOk ? 'ok' : 'warn', shatrOk ? '' : 'Ejaan kitabah arudiyyah shatr ini berbeza daripada sistem.'));
+        return;
+      }
+      let all = true;
+      tds.forEach((td, i) => {
+        const e = exp[i] || '', t = vals[i] || '';
+        if (!t.trim() && !e) { mark(td, ''); return; }
+        const ok = letterKey(t) === letterKey(e);
+        if (!ok) { all = false; const h = arudiHint(letterKey(t), letterKey(e), shatrOk); arudiNotes.push((part === 'sadr' ? 'Sadr' : '\'Ajuz') + ' taf\'ilah ' + (i + 1) + ': ' + h); mark(td, 'warn', h); showAns(td, A().esc(e)); }
+        else mark(td, 'ok');
+      });
+      arudiOk[part] = all;
+    });
+    const bAns = $('#lxAnsBahar').value, lAns = $('#lxAnsLaqob').value;
+    const bOk = bAns ? bAns === S.d.ar : null, lOk = lAns ? lAns === S.d.laqob : null;
+    if (PAINT) {
+      $('#lxAnsBahar').closest('label').className = 'f ' + (bOk === null ? '' : bOk ? 'okf' : 'badf');
+      $('#lxAnsLaqob').closest('label').className = 'f ' + (lOk === null ? '' : lOk ? 'okf' : 'badf');
+    }
+    const pill = (lbl, t) => '<span class="sc"><b>' + t[0] + '/' + t[1] + '</b> ' + lbl + '</span>';
+    const yn = (lbl, v, ans) => v === null ? '' : '<span class="sc ' + (v ? 'g' : 'r') + '">' + lbl + (v ? ' betul' : ' belum tepat — jawapan: <span class="ar-inline">' + A().esc(ans) + '</span>') + '</span>';
+    const arudiTxt = Object.keys(arudiOk).length ? '<span class="sc ' + (Object.values(arudiOk).every(Boolean) ? 'g">كتابة عروضية sepadan' : 'y">كتابة عروضية perlu semak') + '</span>' : '';
+    $('#lxResult').innerHTML = pill('تقطيع', tally.tq) + pill('تفعيلة', tally.taf) + pill('حال', tally.hal) + arudiTxt + yn('Bahar', bOk, S.d.ar) + yn('Laqob', lOk, S.d.laqob) +
+      (S.cols.sadr !== S.exp.sadr.length || (S.cols.ajuz && S.cols.ajuz !== S.exp.ajuz.length) ? '<span class="sc y">Bilangan taf\'ilah belum tepat</span>' : '') +
+      (tally.unsure ? '<span class="sc">' + tally.unsure + ' taf\'ilah (?) tidak dinilai</span>' : '') +
+      ($('#lxTable .ans-hint') ? '<span class="sc ans-note">✓ di bawah petak = jawapan mengikut sistem. Sistem boleh tersilap jika baris syair tidak lengkap — jika ragu, rujuk guru.</span>' : '') +
+      (arudiNotes.length && PAINT ? '<ul class="ar-notes">' + arudiNotes.map(n => '<li>' + A().esc(n) + '</li>').join('') + '</ul>' : '');
+    const full = t => t[1] > 0 && t[0] === t[1];
+    S.grade = { tally, details, bOk: !!bOk, lOk: !!lOk, bAns, lAns };
+    if (!PAINT) return S.grade;
+    const allRight = full(tally.tq) && full(tally.taf) && full(tally.hal) && bOk && lOk &&
+      S.cols.sadr === S.exp.sadr.length && (!S.cols.ajuz || S.cols.ajuz === S.exp.ajuz.length);
+    $('#lxCheer').innerHTML = allRight ? '<div class="cheer"><svg class="i" style="width:22px;height:22px"><use href="#i-check"/></svg><span>Tahniah — semua jawapan betul!</span><span class="ar">أَحْسَنْتَ</span></div>' : '';
+    S.grade.allRight = !!allRight;
+    if (!silent) A().toast(allRight ? 'Semua betul!' : 'Jawapan disemak.');
+    return S.grade;
+  }
+
+  function reveal() {
+    if (!S || !S.v) return;
+    S.cols.sadr = S.exp.sadr.length; if (S.verse[1]) S.cols.ajuz = S.exp.ajuz.length;
+    const keep = collect(); renderSheet(); restore(keep);
+    ['sadr', 'ajuz'].forEach(part => (S.exp[part] || []).forEach((f, i) => {
+      const td = r => $('#lxTable td[data-row="' + r + '"][data-part="' + part + '"][data-i="' + i + '"]');
+      if (!sure(f)) {
+        setTq($('.tq', td('tq')), ''); $('input', td('taf')).value = '؟'; $('input', td('hal')).value = '؟';
+        ['tq', 'taf', 'hal'].forEach(r => mark(td(r), 'unsure', UNSURE_TIP)); return;
+      }
+      setTq($('.tq', td('tq')), f.actual_segment);
+      $('input', td('taf')).value = tafAns(f);
+      $('input', td('hal')).value = /^سالمة/.test(f.zihaf_name_ar) ? 'سالمة' : A().cleanZ(f.zihaf_name_ar);
+      ['tq', 'taf', 'hal'].forEach(r => mark(td(r), 'reveal'));
+    }));
+    ['sadr', 'ajuz'].forEach(part => {
+      const sys = part === 'sadr' ? S.v.sadr : S.v.ajuz; if (!sys || !S.cols[part]) return;
+      const exp = (S.exp[part] || []).every(sure) ? sysFootTexts(part) : null;
+      if (exp) exp.forEach((t, i) => { const td = $('#lxTable td[data-row="arudi"][data-part="' + part + '"][data-i="' + i + '"]'); if (td) { $('input', td).value = t; mark(td, 'reveal'); } });
+      else { const td = $('#lxTable td[data-row="arudi"][data-part="' + part + '"][data-i="0"]'); td.title = 'Sistem: ' + sys.arudi_text; }
+    });
+    $('#lxAnsBahar').value = S.d.ar; $('#lxAnsLaqob').value = S.d.laqob;
+    $('#lxCheer').innerHTML = '';
+    $('#lxResult').innerHTML = '<span class="sc">Jawapan sistem dipaparkan. Kitabah arudiyyah sistem: <span class="ar-inline">' + A().esc(S.v.sadr.arudi_text) +
+      (S.v.ajuz ? ' ‖ ' + A().esc(S.v.ajuz.arudi_text) : '') + '</span></span>';
+  }
+  function clearAns() {
+    if (!S) return; renderSheet(); $('#lxAnsBahar').value = ''; $('#lxAnsLaqob').value = '';
+    $$('#lxAnsBahar, #lxAnsLaqob').forEach(x => { x.closest('label').className = 'f'; });
+  }
+
+  /* ───────────── Init ───────────── */
+  function init() {
+    const bah = A().BAHAR.map(b => b.ar);
+    A().fillSelect($('#lxBahar'), bah, 'Semua bahar');
+    A().fillSelect($('#lxAnsBahar'), bah, '— pilih —');
+    A().fillSelect($('#lxAnsLaqob'), A().LAQOB, '— pilih —');
+    $('#dlTaf').innerHTML = TAF_LIST.map(t => '<option value="' + t + '">').join('');
+    $('#dlHal').innerHTML = HAL_LIST.map(t => '<option value="' + t + '">').join('');
+    fillSyairList();
+  }
+  function onShow() { if (!$('#lxSyair').options.length) fillSyairList(); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    $$('#lxMode button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
+    $('#lxSumber').addEventListener('change', fillSyairList);
+    $('#lxBahar').addEventListener('change', fillSyairList);
+    $('#lxAll').addEventListener('change', fillSyairList);
+    $('#lxSyair').addEventListener('change', fillBaitList);
+    $('#lxRandom').addEventListener('click', pickRandom);
+    $('#lxStart').addEventListener('click', () => { $('#lxSetDone').classList.add('hidden'); start(); });
+    $('#lxSubmit').addEventListener('click', submitItem);
+    ['#lxNama', '#lxKelas'].forEach(id => { $(id).addEventListener('input', () => validateIntake(false)); $(id).addEventListener('blur', () => { if (!$(id).value.trim()) validateIntake(true); }); });
+    $('#lxSetPick').addEventListener('change', () => validateIntake(false));
+
+    $('#lxNext').addEventListener('click', nextItem);
+    $('#lxCheck').addEventListener('click', () => check(false));
+    $('#lxReveal').addEventListener('click', reveal);
+    $('#lxClear').addEventListener('click', clearAns);
+    $('#lxPrint').addEventListener('click', () => window.print());
+    if (window.matchMedia) window.matchMedia('(max-width:760px)').addEventListener('change', e => { if (S && S.narrow !== e.matches) { const k = collect(); renderSheet(); restore(k); if (S.checked && helpOn()) check(true); } });
+    $('#lxHelp').addEventListener('change', () => { fillSyairList(); if (S) { const k = collect(); renderSheet(); restore(k); } });
+    $$('#lxPad button').forEach(b => {
+      b.addEventListener('mousedown', e => e.preventDefault()); // kekalkan fokus pada petak
+      b.addEventListener('click', () => { typeTq(b.dataset.k); if (activeTq) activeTq.focus(); });
+    });
+  });
+
+  /* ───────────── Set daripada guru ───────────── */
+  const SETKEY = 'lxPelajar';
+  function fillSetList() {
+    const sets = A().sortSets((A().D.sets || []).filter(x => x.Status === 'Aktif' && (x.items || []).length));
+    const cur = $('#lxSetPick').value;
+    $('#lxSetPick').innerHTML = '<option value="">' + (sets.length ? '— Pilih set soalan —' : '(belum ada set aktif)') + '</option>' +
+      sets.map(x => '<option value="' + A().esc(x.ID) + '">' + A().esc(x.Nama_Set + (x.Kelas_Sasaran ? ' — ' + x.Kelas_Sasaran : '')) + '</option>').join('');
+    if (sets.some(x => x.ID === cur)) $('#lxSetPick').value = cur;
+    $('#lxSetEmpty').classList.toggle('hidden', !!sets.length);
+    try { const me = JSON.parse(localStorage.getItem(SETKEY) || '{}'); if (me.nama && !$('#lxNama').value) $('#lxNama').value = me.nama; if (me.kelas && !$('#lxKelas').value) $('#lxKelas').value = me.kelas; } catch (e) {}
+    validateIntake(false);
+  }
+  function intakeState() {
+    return { nama: $('#lxNama').value.trim().length >= 3, kelas: !!$('#lxKelas').value.trim(), set: !!$('#lxSetPick').value };
+  }
+  function setStartState(ok) { const b = $('#lxStart'); b.classList.toggle('is-off', !ok); b.setAttribute('aria-disabled', String(!ok)); }
+  const intakeValid = () => { const s = intakeState(); return s.nama && s.kelas && s.set; };
+  function validateIntake(showErr) {
+    const st = intakeState();
+    [['stNama', st.nama, '#lxNama'], ['stKelas', st.kelas, '#lxKelas'], ['stSet', st.set, '#lxSetPick']].forEach(([id, ok, inp]) => {
+      const li = $('#' + id); li.classList.toggle('done', ok);
+      if (ok) li.classList.remove('err'); else if (showErr) li.classList.add('err');
+      $(inp).setAttribute('aria-invalid', String(!ok && li.classList.contains('err')));
+    });
+    const n = [st.nama, st.kelas, st.set].filter(Boolean).length;
+    $('#lxIntakeCount').textContent = n + ' / 3 lengkap';
+    const set = (A().D.sets || []).find(x => x.ID === $('#lxSetPick').value);
+    $('#lxSetInfo').textContent = set ? set.items.length + ' soalan · ' + (set.Bantuan === 'Tidak' ? 'jawapan direkod tanpa semakan segera' : 'betul/salah dipaparkan selepas setiap soalan') + (set.Kelas_Sasaran ? ' · untuk ' + set.Kelas_Sasaran : '') : '';
+    if (modeNow() === 'set') setStartState(st.nama && st.kelas && st.set);
+    return st.nama && st.kelas && st.set;
+  }
+  const progKey = () => 'lxProg:' + SET.set.ID + '|' + SET.nama.toLowerCase() + '|' + SET.kelas.toLowerCase();
+  function saveProg() { try { localStorage.setItem(progKey(), JSON.stringify({ done: SET.done, idx: SET.idx })); } catch (e) {} }
+  function loadProg() { try { return JSON.parse(localStorage.getItem(progKey()) || 'null'); } catch (e) { return null; } }
+  const doneCount = () => Object.keys(SET.done).length;
+  function syncSetUI() {
+    const inSet = modeNow() === 'set', active = inSet && !!SET;
+    $('#lxSetPanel').classList.toggle('hidden', !inSet || active);
+    $('#lxStartRow').classList.toggle('hidden', active);
+  }
+  function startSet() {
+    if (!validateIntake(true)) {
+      A().toast('Lengkapkan nama, kelas dan set soalan dahulu.', true);
+      const first = $('.istep.err input, .istep.err select'); if (first) first.focus(); return;
+    }
+    const set = (A().D.sets || []).find(x => x.ID === $('#lxSetPick').value);
+    const nama = $('#lxNama').value.trim(), kelas = $('#lxKelas').value.trim();
+    try { localStorage.setItem(SETKEY, JSON.stringify({ nama, kelas })); } catch (e) {}
+    SET = { set, idx: 0, nama, kelas, done: {}, submitted: false };
+    const old = loadProg();
+    if (old && old.done) {
+      Object.keys(old.done).forEach(k => { if (Number(k) < set.items.length) SET.done[k] = old.done[k]; });
+      const firstOpen = set.items.findIndex((_, i) => !(i in SET.done));
+      SET.idx = firstOpen < 0 ? set.items.length - 1 : firstOpen;
+      if (doneCount()) A().toast('Menyambung set — ' + doneCount() + ' item sudah dihantar sebelum ini.');
+    }
+    $('#lxSetDone').classList.add('hidden');
+    syncSetUI();
+    openItem();
+  }
+  function goItem(i) {
+    if (!SET) return;
+    i = Math.max(0, Math.min(SET.set.items.length - 1, i));
+    SET.idx = i; saveProg(); openItem();
+  }
+  function exitSet() {
+    if (!SET) return;
+    SET = null; S = null;
+    $('#lxSheet').classList.add('hidden'); $('#lxSetDone').classList.add('hidden');
+    syncSetUI(); validateIntake(false);
+    $('#lxSetPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function openItem() {
+    SET.submitted = false;
+    startVerse(SET.set.items[SET.idx].bait);
+    if (SET.idx in SET.done) $('#lxResult').innerHTML = '<span class="sc g">Item ini sudah dihantar' + (helpOn() ? ' — skor ' + SET.done[SET.idx] + '%' : '') + '. Hantar semula akan menggantikan jawapan lama.</span>';
+  }
+  function renderSetBar() {
+    const bar = $('#lxSetBar');
+    if (!SET) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+    const n = SET.set.items.length, i = SET.idx, dc = doneCount();
+    bar.innerHTML = '<div class="setbar-top"><div><b>' + A().esc(SET.set.Nama_Set) + '</b><span class="meta-note"> · ' + A().esc(SET.nama) + (SET.kelas ? ' (' + A().esc(SET.kelas) + ')' : '') + ' · ' + dc + '/' + n + ' dihantar</span></div>' +
+      '<button type="button" class="btn ghost small" data-sx="exit">Keluar set</button></div>' +
+      '<div class="setnav"><button type="button" class="btn ghost small" data-sx="prev"' + (i === 0 ? ' disabled' : '') + ' aria-label="Soalan sebelum">‹ Sebelum</button>' +
+      '<div class="steps" role="group" aria-label="Soalan ' + (i + 1) + ' daripada ' + n + '">' + SET.set.items.map((_, k) =>
+        '<button type="button" data-go="' + k + '" class="' + [k === i ? 'now' : '', k in SET.done ? 'done' : ''].join(' ').trim() + '" aria-label="Soalan ' + (k + 1) + (k in SET.done ? ' (sudah dihantar)' : '') + '"' + (k === i ? ' aria-current="step"' : '') + '>' + (k + 1) + '</button>').join('') + '</div>' +
+      (i < n - 1 ? '<button type="button" class="btn ghost small" data-sx="next" aria-label="Soalan seterusnya">Seterusnya ›</button>'
+        : '<button type="button" class="btn small ' + (dc === n ? 'primary' : 'ghost') + '" data-sx="finish">Selesai</button>') + '</div>';
+    $$('[data-go]', bar).forEach(b => b.addEventListener('click', () => goItem(Number(b.dataset.go))));
+    $$('[data-sx]', bar).forEach(b => b.addEventListener('click', () => {
+      const a = b.dataset.sx;
+      if (a === 'prev') goItem(SET.idx - 1); else if (a === 'next') goItem(SET.idx + 1);
+      else if (a === 'exit') exitSet(); else if (a === 'finish') tryFinish();
+    }));
+  }
+  function itemScore(g) {
+    const t = g.tally, tot = t.tq[1] + t.taf[1] + t.hal[1], ok = t.tq[0] + t.taf[0] + t.hal[0];
+    return Math.round((tot ? 80 * ok / tot : 0) + (g.bOk ? 10 : 0) + (g.lOk ? 10 : 0));
+  }
+  async function submitItem() {
+    if (!SET || SET.submitted) return;
+    if (!$('#lxAnsBahar').value || !$('#lxAnsLaqob').value) { A().toast('Pilih bahar dan laqob sebelum menghantar.', true); return; }
+    const help = helpOn();
+    PAINT = help; let g;
+    try { g = check(true); } finally { PAINT = true; }
+    if (!g) { g = { tally: { tq: [0, 0], taf: [0, 0], hal: [0, 0] }, details: [], bOk: false, lOk: false, bAns: $('#lxAnsBahar').value, lAns: $('#lxAnsLaqob').value }; }
+    const skor = itemScore(g), it = SET.set.items[SET.idx], idx = SET.idx;
+    const payload = {
+      Set_ID: SET.set.ID, Nama_Pelajar: SET.nama, Kelas: SET.kelas, Item_No: idx + 1,
+      Teks: it.bait[1] ? it.bait[0] + ' # ' + it.bait[1] : it.bait[0],
+      Bahar_Sebenar: S.d ? S.d.ar : '', Laqob_Sebenar: S.d ? S.d.laqob : '', Bahar_Jawapan: g.bAns, Laqob_Jawapan: g.lAns,
+      Bahar_OK: g.bOk, Laqob_OK: g.lOk, Taqti_Betul: g.tally.tq[0], Taqti_Jumlah: g.tally.tq[1], Taf_Betul: g.tally.taf[0], Taf_Jumlah: g.tally.taf[1],
+      Hal_Betul: g.tally.hal[0], Hal_Jumlah: g.tally.hal[1], Skor: skor, Butiran_JSON: JSON.stringify(g.details), Kod: window.Akses ? window.Akses.kod() : ''
+    };
+    const btn = $('#lxSubmit'); btn.disabled = true; btn.textContent = 'Menghantar…';
+    try { await A().call('submitJawapan', payload); }
+    catch (e) { btn.disabled = false; btn.textContent = 'Hantar jawapan'; A().toast('Gagal menghantar: ' + e.message, true); return; }
+    btn.textContent = 'Hantar jawapan';
+    if (!SET || SET.idx !== idx) return;
+    SET.submitted = true; SET.done[idx] = skor; saveProg();
+    btn.classList.add('hidden');
+    const last = idx >= SET.set.items.length - 1, all = doneCount() === SET.set.items.length;
+    if (help) {
+      $('#lxResult').insertAdjacentHTML('beforeend', '<span class="sc"><b>' + skor + '%</b> skor item</span>' +
+        (S.d && (!g.bOk || !g.lOk) ? '<span class="sc">Jawapan sebenar: <span class="ar-inline">' + A().esc(S.d.ar + ' ' + S.d.laqob) + '</span></span>' : ''));
+      $('#lxNext').textContent = all ? 'Lihat keputusan set' : last ? 'Soalan belum dijawab' : 'Soalan seterusnya ›';
+      $('#lxNext').classList.remove('hidden');
+      renderSetBar();
+      A().toast('Jawapan soalan ' + (idx + 1) + ' dihantar.');
+      $('#lxNext').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      A().toast('Jawapan soalan ' + (idx + 1) + ' dihantar.');
+      nextItem();
+    }
+  }
+  function nextItem() {
+    if (!SET) return;
+    const n = SET.set.items.length;
+    if (doneCount() >= n) return finishSet();
+    // soalan seterusnya yang belum dihantar (selepas item semasa, kemudian dari awal)
+    let j = -1;
+    for (let k = 1; k <= n; k++) { const c = (SET.idx + k) % n; if (!(c in SET.done)) { j = c; break; } }
+    goItem(j < 0 ? Math.min(SET.idx + 1, n - 1) : j);
+  }
+  function tryFinish() {
+    const n = SET.set.items.length, left = n - doneCount();
+    if (left > 0) {
+      A().toast(left + ' soalan belum dihantar. Tekan "Selesai" sekali lagi untuk tamat juga.', true);
+      if (!SET.confirmFinish) { SET.confirmFinish = true; return; }
+    }
+    finishSet();
+  }
+  function finishSet() {
+    const help = SET.set.Bantuan !== 'Tidak';
+    const sk = Object.values(SET.done), n = SET.set.items.length;
+    const avg = sk.length ? Math.round(sk.reduce((a, b) => a + b, 0) / sk.length) : 0;
+    $('#lxSheet').classList.add('hidden');
+    $('#lxSetDone').innerHTML = '<div class="panel done-card"><div class="cheer" style="margin:0"><svg class="i" style="width:22px;height:22px"><use href="#i-check"/></svg><span>Set "' + A().esc(SET.set.Nama_Set) + '" — ' +
+      sk.length + '/' + n + ' soalan dihantar' + (help && sk.length ? ' · purata skor ' + avg + '%' : '') + '.</span><span class="ar">بَارَكَ اللهُ فِيكَ</span></div>' +
+      '<p class="hint" style="margin:12px 0 0">Jawapan anda telah direkodkan untuk guru. ' + (help ? '' : 'Keputusan akan dimaklumkan oleh guru.') + '</p></div>';
+    $('#lxSetDone').classList.remove('hidden');
+    SET = null; syncSetUI();
+  }
+
+  function loadOwn(verse) {
+    setMode('sendiri');
+    $('#lxOwnText').value = verse[1] ? verse[0] + ' # ' + verse[1] : verse[0];
+    start();
+  }
+  function refresh() { try { fillSyairList(); fillSetList(); } catch (e) {} }
+  window.Latihan = { init, onShow, loadOwn, refresh, analyseVerse, setMode };
+})();
+
+</script>

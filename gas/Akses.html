@@ -1,0 +1,302 @@
+<script>
+/* Akses berbayar: kunci Latihan dengan kod (pelajar) + tab Akses (guru). Bayaran manual, guru luluskan. */
+(function () {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const A = () => window.ArudApp;
+  const esc = s => A().esc(s);
+  const KEY = 'aksesKod', KEY_MOHON = 'aksesMohon', KEY_DEV = 'perantiId';
+  const ls = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } },
+    set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  function deviceId() {
+    let d = ls.get(KEY_DEV);
+    if (!d) { d = 'P' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); ls.set(KEY_DEV, d); }
+    return d;
+  }
+  const info = () => (A().D && A().D.akses) || { berbayar: false, pakej: [] };
+  const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const fmtKod = k => { const n = String(k || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^AR/, ''); return n.length === 8 ? 'AR-' + n.slice(0, 4) + '-' + n.slice(4) : String(k || '').toUpperCase(); };
+  const tel = t => String(t || '').replace(/^'/, '');
+  const waNo = t => { let d = tel(t).replace(/\D/g, ''); if (d.startsWith('0')) d = '6' + d; return d; };
+  const rm = n => 'RM' + Number(n || 0).toLocaleString('ms-MY', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+  let ACC = null;      // { Kod, Nama, Kelas_Sekolah, Tamat, Bulan }
+  let PAKEJ = null;    // bulan dipilih
+
+  /* ───────────── Pelajar ───────────── */
+  const isOpen = () => !info().berbayar || A().ROLE === 'guru' || (ACC && ACC.Tamat >= today());
+  function kod() { return ACC ? ACC.Kod : ''; }
+
+  function applyGate() {
+    const sec = $('#view-latihan'); if (!sec) return;
+    const locked = !isOpen();
+    sec.classList.toggle('locked', locked);
+    $('#aksesGate').classList.toggle('hidden', !locked);
+    const bar = $('#aksesBar');
+    if (info().berbayar && ACC && A().ROLE !== 'guru' && !locked) {
+      const days = Math.round((new Date(ACC.Tamat) - new Date(today())) / 864e5);
+      bar.innerHTML = '<span><svg class="i"><use href="#i-unlock"/></svg> Akses aktif · <b>' + esc(ACC.Nama) + '</b> · sah hingga ' + esc(ACC.Tamat) +
+        (days <= 7 ? ' <span class="lvl-warn">(' + days + ' hari lagi)</span>' : '') + '</span><button type="button" class="btn small ghost" id="aksesOut">Tukar / keluar kod</button>';
+      bar.classList.remove('hidden');
+      $('#aksesOut').addEventListener('click', () => { ACC = null; ls.set(KEY, null); applyGate(); A().toast('Kod dikeluarkan daripada peranti ini.'); });
+      // isi nama/kelas set guru daripada kod
+      const n = $('#lxNama'); if (n && !n.value.trim()) { n.value = ACC.Nama; n.dispatchEvent(new Event('input')); }
+    } else bar.classList.add('hidden');
+    if (locked) renderGate();
+  }
+
+  function renderGate() {
+    const I = info(), g = $('#aksesGate');
+    if (g.dataset.built === '1') { renderMohonStatus(); return; }
+    g.dataset.built = '1';
+    const pk = I.pakej || [];
+    if (PAKEJ == null && pk.length) PAKEJ = pk[Math.min(1, pk.length - 1)].bulan;
+    g.innerHTML =
+      '<div class="gate-head"><span class="gate-ico" aria-hidden="true"><svg class="i"><use href="#i-lock"/></svg></span><div><h2>Latihan memerlukan kod akses</h2>' +
+      '<p class="hint" style="margin:0">Semak syair kekal percuma. Untuk latihan taqti\' dan set soalan guru, masukkan kod akses atau beli pakej.</p></div></div>' +
+      '<div class="gate-grid">' +
+      '<form class="gate-card" id="gKodForm" autocomplete="off"><h3>Saya ada kod</h3>' +
+      '<label class="f">Kod akses<input id="gKod" class="kod-in" placeholder="AR-XXXX-XXXX" maxlength="14" autocapitalize="characters" spellcheck="false" required></label>' +
+      '<button type="submit" class="btn primary" id="gKodBtn">Masuk latihan</button><p class="meta-note" id="gKodMsg" role="status"></p></form>' +
+      '<div class="gate-card buy"><h3>Beli akses</h3>' +
+      (pk.length ? '<div class="pk-row" role="radiogroup" aria-label="Pakej">' + pk.map(p => '<button type="button" role="radio" class="pk" data-b="' + p.bulan + '" aria-checked="' + (p.bulan === PAKEJ) + '"><b>' + p.bulan + ' bulan</b><span>' + rm(p.harga) + '</span></button>').join('') + '</div>' : '<p class="notice">Pakej belum ditetapkan oleh guru.</p>') +
+      '<ol class="buy-steps"><li><b>Bayar</b> jumlah pakej yang dipilih:<div class="pay-info">' + esc(I.bayaran || '—') + '</div>' + (I.qr ? '<img class="pay-qr" alt="QR bayaran" src="' + esc(qrSrc(I.qr)) + '">' : '') + '</li>' +
+      '<li><b>Isi borang</b> dan lampirkan resit.</li><li><b>Tunggu pengesahan</b> guru — kod akses akan dipaparkan di sini (simpan ID permohonan anda).</li></ol>' +
+      '<form id="gBuyForm" class="buy-form" autocomplete="on">' +
+      '<label class="f">Nama penuh<input name="Nama" required minlength="3" autocomplete="name"></label>' +
+      '<label class="f">Kelas / sekolah<input name="Kelas_Sekolah" placeholder="cth. 6 Atas, SMKA ..."></label>' +
+      '<label class="f">No. telefon (WhatsApp)<input name="Telefon" required inputmode="tel" placeholder="01x-xxxxxxx"></label>' +
+      '<label class="f">Emel <span class="meta-note">(pilihan — kod dihantar ke emel)</span><input name="Emel" type="email"></label>' +
+      '<label class="f">No. rujukan bayaran<input name="Rujukan_Bayaran" placeholder="cth. no. transaksi DuitNow / FPX"></label>' +
+      '<label class="f">Resit <span class="meta-note">(gambar/PDF, ≤ 5 MB)</span><input name="resit" type="file" accept="image/*,application/pdf"></label>' +
+      '<button type="submit" class="btn primary" id="gBuyBtn">Hantar permohonan' + (PAKEJ ? ' · ' + PAKEJ + ' bulan' : '') + '</button></form>' +
+      '<div id="gMohon"></div>' +
+      '<details class="gate-more"><summary>Sudah memohon di peranti lain? Semak status</summary><form id="gStatForm" class="row" style="margin-top:8px">' +
+      '<label class="f">ID permohonan<input id="gStatId" placeholder="PA-001" required></label><label class="f">4 digit akhir telefon<input id="gStatTel" inputmode="numeric" maxlength="4" required></label>' +
+      '<button type="submit" class="btn ghost" style="align-self:flex-end">Semak</button></form></details>' +
+      '</div></div>';
+    $('#gKodForm').addEventListener('submit', e => { e.preventDefault(); enterKod($('#gKod').value); });
+    $('#gKod').addEventListener('input', e => { const v = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''); e.target.value = v; });
+    $$('#aksesGate .pk').forEach(b => b.addEventListener('click', () => {
+      PAKEJ = Number(b.dataset.b);
+      $$('#aksesGate .pk').forEach(x => x.setAttribute('aria-checked', String(x === b)));
+      $('#gBuyBtn').textContent = 'Hantar permohonan · ' + PAKEJ + ' bulan';
+    }));
+    $('#gBuyForm').addEventListener('submit', submitBuy);
+    $('#gStatForm').addEventListener('submit', async e => { e.preventDefault(); await checkStatus($('#gStatId').value.trim(), $('#gStatTel').value.trim(), true); });
+    renderMohonStatus();
+  }
+  function qrSrc(u) { const m = String(u).match(/\/d\/([\w-]{20,})|[?&]id=([\w-]{20,})/); return m ? 'https://drive.google.com/thumbnail?id=' + (m[1] || m[2]) + '&sz=w400' : u; }
+
+  async function enterKod(raw, silent) {
+    const k = fmtKod(raw), btn = $('#gKodBtn'), msg = $('#gKodMsg');
+    if (!/^AR-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(k)) { if (msg) msg.textContent = 'Format kod: AR-XXXX-XXXX'; return false; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Menyemak…'; }
+    try {
+      const r = await A().call('semakKod', k, deviceId());
+      ACC = r; ls.set(KEY, r);
+      if (!silent) A().toast('Akses dibuka. Selamat berlatih!');
+      applyGate(); return true;
+    } catch (e) {
+      if (msg) msg.textContent = e.message;
+      if (!silent) A().toast(e.message, true);
+      return false;
+    } finally { if (btn) { btn.disabled = false; btn.textContent = 'Masuk latihan'; } }
+  }
+
+  async function submitBuy(e) {
+    e.preventDefault();
+    const f = e.target, btn = $('#gBuyBtn');
+    if (!PAKEJ) { A().toast('Pilih pakej dahulu.', true); return; }
+    const file = f.resit.files[0];
+    if (!f.Rujukan_Bayaran.value.trim() && !file) { A().toast('Masukkan no. rujukan bayaran atau lampirkan resit.', true); return; }
+    if (file && file.size > 5 * 1024 * 1024) { A().toast('Saiz resit melebihi 5 MB.', true); return; }
+    btn.disabled = true; btn.textContent = 'Menghantar…';
+    try {
+      const resit = file ? { name: file.name, type: file.type, data: await toB64(file) } : null;
+      const out = await A().call('mohonAkses', { Nama: f.Nama.value, Kelas_Sekolah: f.Kelas_Sekolah.value, Telefon: f.Telefon.value, Emel: f.Emel.value,
+        Rujukan_Bayaran: f.Rujukan_Bayaran.value, Pakej_Bulan: PAKEJ, resit });
+      ls.set(KEY_MOHON, { ID: out.ID, tel4: f.Telefon.value.replace(/\D/g, '').slice(-4), Status: out.Status, Pakej_Bulan: out.Pakej_Bulan, Jumlah: out.Jumlah });
+      f.reset(); renderMohonStatus();
+      A().toast('Permohonan ' + out.ID + ' dihantar.');
+    } catch (err) { A().toast(err.message, true); }
+    finally { btn.disabled = false; btn.textContent = 'Hantar permohonan · ' + PAKEJ + ' bulan'; }
+  }
+  function toB64(file) {
+    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+  }
+
+  function renderMohonStatus() {
+    const box = $('#gMohon'); if (!box) return;
+    const m = ls.get(KEY_MOHON);
+    if (!m) { box.innerHTML = ''; $('#gBuyForm').classList.remove('hidden'); return; }
+    const st = m.Status || 'Menunggu';
+    $('#gBuyForm').classList.toggle('hidden', st === 'Menunggu');
+    box.innerHTML = '<div class="mohon-card st-' + esc(st.toLowerCase()) + '"><div><b>Permohonan ' + esc(m.ID) + '</b> · ' + esc(m.Pakej_Bulan) + ' bulan · ' + rm(m.Jumlah) +
+      '<div class="meta-note">Simpan ID ini. Status: <b>' + esc(st) + '</b>' + (m.Catatan ? ' — ' + esc(m.Catatan) : '') + '</div></div>' +
+      '<div class="row" style="gap:6px"><button type="button" class="btn small ghost" id="gStatNow">Semak status</button>' +
+      (st !== 'Menunggu' ? '<button type="button" class="btn small ghost" id="gStatClear">Mohon baharu</button>' : '') + '</div></div>';
+    $('#gStatNow').addEventListener('click', () => checkStatus(m.ID, m.tel4, true));
+    const c = $('#gStatClear'); if (c) c.addEventListener('click', () => { ls.set(KEY_MOHON, null); renderMohonStatus(); });
+  }
+  async function checkStatus(id, tel4, loud) {
+    try {
+      const r = await A().call('semakPermohonan', id, tel4);
+      const prev = ls.get(KEY_MOHON) || {};
+      ls.set(KEY_MOHON, Object.assign({}, prev, { ID: r.ID, tel4, Status: r.Status, Catatan: r.Catatan }));
+      if (r.kod) {
+        A().toast('Bayaran disahkan! Kod anda: ' + r.kod.Kod);
+        ls.set(KEY_MOHON, null);
+        await enterKod(r.kod.Kod, true);
+        if (isOpen()) A().toast('Akses dibuka — kod ' + r.kod.Kod + ' (sah hingga ' + r.kod.Tamat + '). Simpan kod ini.');
+        else if ($('#gKod')) $('#gKod').value = r.kod.Kod;
+      } else if (loud) A().toast(r.Status === 'Ditolak' ? 'Permohonan ditolak' + (r.Catatan ? ': ' + r.Catatan : '.') : 'Masih menunggu pengesahan guru.', r.Status === 'Ditolak');
+      renderMohonStatus();
+    } catch (e) { if (loud) A().toast(e.message, true); }
+  }
+
+  /* ───────────── Guru: tab Akses ───────────── */
+  let FILTER = 'Menunggu', CARI = '', JUST = {};
+  function kodStatus(k) { if (k.Status !== 'Aktif') return ['batal', 'Dibatalkan']; if (String(k.Tamat).slice(0, 10) < today()) return ['tamat', 'Tamat']; return ['aktif', 'Aktif']; }
+  function waLink(t, msg) { const n = waNo(t); return n ? 'https://wa.me/' + n + '?text=' + encodeURIComponent(msg) : ''; }
+  const kodMsg = k => 'Assalamualaikum ' + k.Nama + '. Bayaran anda telah disahkan.\nKod akses Taqti\' Pro: ' + k.Kod + '\nSah hingga: ' + String(k.Tamat).slice(0, 10) + '\nMasukkan kod di tab Latihan.';
+
+  function renderGuru() {
+    const D = A().D, M = D.mohon || [], K = D.kod || [], I = info();
+    const wait = M.filter(m => m.Status === 'Menunggu');
+    const aktif = K.filter(k => kodStatus(k)[0] === 'aktif');
+    const thisMonth = today().slice(0, 7);
+    const hasil = M.filter(m => m.Status === 'Diluluskan' && String(m.Diproses || m.Tarikh).slice(0, 7) === thisMonth).reduce((s, m) => s + (Number(m.Jumlah) || 0), 0);
+    $('#cAkses').textContent = wait.length || '';
+    const pk = (I.pakej || []).map(p => p.bulan + ' bln ' + rm(p.harga)).join(' · ');
+    $('#akMode').innerHTML = '<div class="mode-row"><div>' + (I.berbayar
+      ? '<span class="pill sah">Mod berbayar AKTIF</span> Latihan dikunci untuk pelajar tanpa kod. Pelajar nampak pakej: <b>' + esc(pk || '—') + '</b>.'
+      : '<span class="pill semak">Mod percuma</span> Latihan terbuka kepada semua pelajar — pakej <b>tidak</b> dipaparkan.') +
+      '<div class="meta-note">Harga, maklumat bayaran &amp; QR diubah dalam tab <b>Tetapan</b> (Pakej_Harga, Maklumat_Bayaran, QR_Bayaran_URL).</div></div>' +
+      '<button type="button" class="btn ' + (I.berbayar ? 'ghost' : 'primary') + '" id="akToggle">' + (I.berbayar ? 'Tukar ke mod percuma' : 'Hidupkan mod berbayar') + '</button></div>';
+    $('#akToggle').addEventListener('click', toggleMode);
+    $('#akTiles').innerHTML = [[wait.length, 'Menunggu pengesahan'], [aktif.length, 'Kod aktif'], [rm(hasil), 'Diluluskan bulan ini']]
+      .map(([v, l]) => '<div class="tile"><div class="tv">' + v + '</div><div class="tl">' + l + '</div></div>').join('');
+    // Permohonan
+    const list = M.filter(m => FILTER === 'Semua' || m.Status === FILTER).slice().sort((a, b) => String(b.Tarikh).localeCompare(String(a.Tarikh)));
+    $$('#akFilter button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.f === FILTER)));
+    $('#akMohon').innerHTML = list.length ? list.map(m => {
+      const k = m.Kod && K.find(x => x.Kod === m.Kod);
+      return '<div class="ak-card st-' + esc(String(m.Status).toLowerCase()) + '" data-id="' + esc(m.ID) + '"><div class="ak-main"><div><b>' + esc(m.Nama) + '</b> <span class="meta-note">' + esc(m.Kelas_Sekolah || '') + '</span></div>' +
+        '<div class="meta-note">' + esc(m.ID) + ' · ' + esc(String(m.Tarikh).slice(0, 16)) + ' · <a href="' + esc(waLink(m.Telefon, 'Assalamualaikum ' + m.Nama + ', berkenaan permohonan ' + m.ID + '.')) + '" target="_blank" rel="noopener">' + esc(tel(m.Telefon)) + '</a>' + (m.Emel ? ' · ' + esc(m.Emel) : '') + '</div>' +
+        '<div class="ak-pay"><span class="chip-l"><b>' + esc(m.Pakej_Bulan) + ' bulan</b> · ' + rm(m.Jumlah) + '</span>' + (m.Rujukan_Bayaran ? '<span class="chip-l">Ruj: ' + esc(m.Rujukan_Bayaran) + '</span>' : '') +
+        (m.Resit_URL ? '<a class="chip-l link" href="' + esc(m.Resit_URL) + '" target="_blank" rel="noopener">Lihat resit ↗</a>' : '<span class="chip-l muted">tiada resit</span>') + '</div>' +
+        (m.Status === 'Ditolak' && m.Catatan ? '<div class="meta-note">Sebab ditolak: ' + esc(m.Catatan) + '</div>' : '') + '</div>' +
+        '<div class="ak-act">' + (m.Status === 'Menunggu'
+          ? '<button type="button" class="btn small primary" data-ap="' + esc(m.ID) + '">Luluskan &amp; jana kod</button><button type="button" class="btn small ghost" data-rj="' + esc(m.ID) + '">Tolak</button>' +
+            '<div class="rj-box hidden"><input placeholder="Sebab (cth. jumlah tidak cukup)" aria-label="Sebab tolak"><button type="button" class="btn small danger" data-rjok="' + esc(m.ID) + '">Sahkan tolak</button></div>'
+          : '<span class="pill ' + (m.Status === 'Diluluskan' ? 'sah' : 'tolak') + '">' + esc(m.Status) + '</span>' +
+            (k ? '<div class="kod-show"><code>' + esc(k.Kod) + '</code><button type="button" class="btn small ghost" data-copy="' + esc(k.Kod) + '">Salin</button>' +
+              (waNo(m.Telefon) ? '<a class="btn small ghost" target="_blank" rel="noopener" href="' + esc(waLink(m.Telefon, kodMsg(k))) + '">Hantar WhatsApp</a>' : '') + '</div>' : '')) +
+        '</div></div>';
+    }).join('') : '<p class="empty">' + (FILTER === 'Menunggu' ? 'Tiada permohonan menunggu.' : 'Tiada permohonan.') + '</p>';
+    // Kod
+    const q = CARI.toLowerCase();
+    const klist = K.filter(k => !q || [k.Kod, k.Nama, k.Kelas_Sekolah, tel(k.Telefon)].join(' ').toLowerCase().includes(q))
+      .slice().sort((a, b) => String(b.Dicipta).localeCompare(String(a.Dicipta)));
+    $('#akKod').innerHTML = klist.length ? klist.map(k => {
+      const [st, stl] = kodStatus(k), dev = String(k.Peranti || '').split(',').filter(Boolean).length;
+      return '<div class="kod-row' + (JUST[k.ID] ? ' just' : '') + '"><div class="kr-main"><div class="kr-top"><code>' + esc(k.Kod) + '</code><span class="pill ' + (st === 'aktif' ? 'sah' : st === 'tamat' ? 'semak' : 'tolak') + '">' + stl + '</span></div>' +
+        '<div><b>' + esc(k.Nama) + '</b> <span class="meta-note">' + esc(k.Kelas_Sekolah || '') + (k.Telefon ? ' · ' + esc(tel(k.Telefon)) : '') + '</span></div>' +
+        '<div class="meta-note">' + esc(k.Bulan) + ' bulan · ' + esc(String(k.Mula).slice(0, 10)) + ' → <b>' + esc(String(k.Tamat).slice(0, 10)) + '</b> · ' + dev + '/' + (info().hadPeranti || 2) + ' peranti' + (k.Permohonan_ID ? ' · ' + esc(k.Permohonan_ID) : ' · jana manual') + '</div></div>' +
+        '<div class="kr-act"><button type="button" class="btn small ghost" data-copy="' + esc(k.Kod) + '">Salin</button>' +
+        (waNo(k.Telefon) ? '<a class="btn small ghost" target="_blank" rel="noopener" href="' + esc(waLink(k.Telefon, kodMsg(k))) + '">WhatsApp</a>' : '') +
+        '<span class="lj"><select aria-label="Tempoh lanjutan" data-ljn="' + esc(k.ID) + '">' + [1, 2, 3, 6, 12].map(n => '<option value="' + n + '">+' + n + ' bln</option>').join('') + '</select><button type="button" class="btn small ghost" data-lj="' + esc(k.ID) + '">Lanjut</button></span>' +
+        (dev ? '<button type="button" class="btn small ghost" data-dev="' + esc(k.ID) + '" title="Benarkan kod digunakan semula pada peranti baharu">Set semula peranti</button>' : '') +
+        (k.Status === 'Aktif' ? '<button type="button" class="btn small danger" data-off="' + esc(k.ID) + '">Batal</button>' : '<button type="button" class="btn small ghost" data-on="' + esc(k.ID) + '">Aktifkan</button>') +
+        '</div></div>';
+    }).join('') : '<p class="empty">Belum ada kod.</p>';
+    bindGuru();
+  }
+
+  function bindGuru() {
+    const D = A().D;
+    $$('#view-akses [data-copy]').forEach(b => b.addEventListener('click', () => copy(b.dataset.copy)));
+    $$('#akMohon [data-ap]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true; b.textContent = 'Menjana kod…';
+      try {
+        const r = await A().call('luluskanPermohonan', b.dataset.ap);
+        D.mohon = D.mohon.map(m => m.ID === r.mohon.ID ? r.mohon : m); D.kod = (D.kod || []).concat([r.kod]);
+        JUST = { [r.kod.ID]: 1 }; FILTER = 'Semua'; renderGuru();
+        A().toast('Diluluskan. Kod: ' + r.kod.Kod + ' — pelajar boleh tekan "Semak status", atau hantar melalui WhatsApp.');
+      } catch (e) { A().toast(e.message, true); b.disabled = false; b.textContent = 'Luluskan & jana kod'; }
+    }));
+    $$('#akMohon [data-rj]').forEach(b => b.addEventListener('click', () => { const box = $('.rj-box', b.closest('.ak-act')); box.classList.toggle('hidden'); if (!box.classList.contains('hidden')) $('input', box).focus(); }));
+    $$('#akMohon [data-rjok]').forEach(b => b.addEventListener('click', async () => {
+      const sebab = $('input', b.parentNode).value.trim(); b.disabled = true;
+      try { await A().call('tolakPermohonan', b.dataset.rjok, sebab); const m = D.mohon.find(x => x.ID === b.dataset.rjok); m.Status = 'Ditolak'; m.Catatan = sebab; renderGuru(); A().toast('Permohonan ditolak.'); }
+      catch (e) { A().toast(e.message, true); b.disabled = false; }
+    }));
+    const act = async (sel, tindakan, okMsg, nilaiFn) => $$('#akKod [' + sel + ']').forEach(b => b.addEventListener('click', async () => {
+      const id = b.getAttribute(sel); b.disabled = true;
+      try { const k = await A().call('urusKod', id, tindakan, nilaiFn ? nilaiFn(id) : ''); D.kod = D.kod.map(x => x.ID === id ? k : x); JUST = { [id]: 1 }; renderGuru(); A().toast(okMsg); }
+      catch (e) { A().toast(e.message, true); b.disabled = false; }
+    }));
+    act('data-off', 'batal', 'Kod dibatalkan.');
+    act('data-on', 'aktif', 'Kod diaktifkan semula.');
+    act('data-dev', 'peranti', 'Senarai peranti dikosongkan.');
+    act('data-lj', 'lanjut', 'Tempoh dilanjutkan.', id => $('#akKod [data-ljn="' + id + '"]').value);
+  }
+  function copy(t) {
+    const done = () => A().toast('Disalin: ' + t);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, () => fallback());
+    else fallback();
+    function fallback() { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { A().toast(t); } ta.remove(); }
+  }
+
+  async function toggleMode() {
+    const b = $('#akToggle'), want = info().berbayar ? 'Percuma' : 'Berbayar';
+    if (want === 'Berbayar' && b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Sahkan: kunci Latihan untuk pelajar'; setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = 'Hidupkan mod berbayar'; } }, 5000); return; }
+    b.disabled = true;
+    try {
+      const a = await A().call('setModAkses', want);
+      A().D.akses = a; renderGuru(); applyGate();
+      A().toast(want === 'Berbayar' ? 'Mod berbayar dihidupkan. Pelajar perlu kod untuk Latihan (muat semula halaman pelajar).' : 'Mod percuma — Latihan terbuka kepada semua.');
+    } catch (e) { A().toast(e.message, true); b.disabled = false; }
+  }
+  async function janaManual(e) {
+    e.preventDefault();
+    const f = e.target, btn = $('#akJanaBtn'); btn.disabled = true;
+    try {
+      const k = await A().call('janaKodManual', { Nama: f.Nama.value, Kelas_Sekolah: f.Kelas_Sekolah.value, Telefon: f.Telefon.value, Bulan: f.Bulan.value, Catatan: f.Catatan.value });
+      A().D.kod = (A().D.kod || []).concat([k]); JUST = { [k.ID]: 1 }; f.reset(); renderGuru();
+      A().toast('Kod dijana: ' + k.Kod);
+    } catch (err) { A().toast(err.message, true); }
+    btn.disabled = false;
+  }
+
+  /* ───────────── Init ───────────── */
+  async function init() {
+    ACC = ls.get(KEY);
+    if (ACC && ACC.Tamat < today()) { ACC = null; ls.set(KEY, null); }
+    applyGate();
+    if (!info().berbayar) return;
+    // sahkan semula kod tersimpan (mungkin dibatalkan/dilanjutkan oleh guru)
+    if (ACC) {
+      try { ACC = await A().call('semakKod', ACC.Kod, deviceId()); ls.set(KEY, ACC); }
+      catch (e) { if (!/gagal|network|timeout/i.test(e.message)) { ACC = null; ls.set(KEY, null); A().toast(e.message, true); } }
+      applyGate();
+    } else {
+      const m = ls.get(KEY_MOHON);
+      if (m && m.Status === 'Menunggu') checkStatus(m.ID, m.tel4, false);
+    }
+  }
+  function onShow() { renderGuru(); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    $$('#akFilter button').forEach(b => b.addEventListener('click', () => { FILTER = b.dataset.f; JUST = {}; renderGuru(); }));
+    $('#akCari').addEventListener('input', e => { CARI = e.target.value; renderGuru(); });
+    $('#akJana').addEventListener('submit', janaManual);
+  });
+  window.Akses = { init, applyGate, onShow, kod, isOpen, renderGuru };
+})();
+
+</script>

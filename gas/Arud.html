@@ -1,0 +1,831 @@
+<script>
+/*
+ * ArudJS — enjin taqti' & pengecaman bahar untuk pelayar / Node.
+ * Port JavaScript daripada PyArud v1.0.0 (https://github.com/cnemri/pyarud), Lesen MIT,
+ * Copyright (c) cnemri. Logik asal dikekalkan sedekat mungkin supaya keputusan sama.
+ */
+(function (root) {
+  'use strict';
+
+  // ───────────────────────── core/constants ─────────────────────────
+  const HAMZA = 'ء', ALEF_MADDA = 'آ', ALEF_HAMZA_ABOVE = 'أ', WAW_HAMZA = 'ؤ',
+    ALEF_HAMZA_BELOW = 'إ', YEH_HAMZA = 'ئ', ALEF = 'ا', TEH_MARBUTA = 'ة',
+    TATWEEL = 'ـ', HEH = 'ه', WAW = 'و', ALEF_MAKSURA = 'ى', YEH = 'ي',
+    NOON = 'ن', WASLA = 'ٱ', DAGGER_ALEF = 'ٰ';
+  const FATHATAN = 'ً', DAMMATAN = 'ٌ', KASRATAN = 'ٍ', FATHA = 'َ', DAMMA = 'ُ',
+    KASRA = 'ِ', SHADDA = 'ّ', SUKUN = 'ْ', MADDA_ABOVE = 'ٓ', HAMZA_ABOVE = 'ٔ',
+    HAMZA_BELOW = 'ٕ';
+  const HARAKAT = [FATHA, DAMMA, KASRA];
+  const TANWEEN = [FATHATAN, DAMMATAN, KASRATAN];
+  const LONG_VOWELS = [ALEF, WAW, YEH, ALEF_MAKSURA, DAGGER_ALEF];
+  const TASHKEEL = [FATHATAN, DAMMATAN, KASRATAN, FATHA, DAMMA, KASRA, SHADDA, SUKUN, MADDA_ABOVE, HAMZA_ABOVE, HAMZA_BELOW, DAGGER_ALEF];
+  const ALPHABETIC = 'ابتثجحخدذرزسشصضطظعغفقكلمنهوي'.split('');
+  const HAMZAT = [HAMZA, ALEF_MADDA, ALEF_HAMZA_ABOVE, ALEF_HAMZA_BELOW, WAW_HAMZA, YEH_HAMZA, WASLA];
+  const LETTERS = ALPHABETIC.concat(HAMZAT, [ALEF_MAKSURA, TEH_MARBUTA]).join('');
+  const SUN_LETTERS = 'تثدذرزسشصضطظلن';
+  const ALL_PUNCTUATION = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~،؛؟«»';
+  const HARAKAT_SET = new Set(HARAKAT), TANWEEN_SET = new Set(TANWEEN), TASHKEEL_SET = new Set(TASHKEEL),
+    LETTERS_SET = new Set(LETTERS.split('')), LONG_VOWELS_SET = new Set(LONG_VOWELS);
+
+  const METER_PRIORITY = {
+    taweel: 30, hazaj: 25, rajaz: 25, saree: 25, kamel: 20, baseet: 20, ramal: 20, khafeef: 20,
+    mutakareb: 20, mutadarak: 20, wafer: 10, munsareh: 15, madeed: 15, mujtath: 10, mudhare: 10, muqtadheb: 10
+  };
+  const prio = k => METER_PRIORITY[k] || 0;
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\\-]/g, '\\$&');
+  const round3 = x => Math.round(x * 1000) / 1000;
+
+  // ───────────────────────── core/arabic ─────────────────────────
+  function stripChars(text, set) { let o = ''; for (const c of text) if (!set.has(c)) o += c; return o; }
+  function stripTashkeel(text) { return text ? stripChars(text, TASHKEEL_SET) : ''; }
+  function normalizeLigatures(text) {
+    if (!text) return '';
+    const lig = { 'ﻻ': 'ل' + ALEF, 'ﻼ': 'ل' + ALEF, 'ﻷ': 'ل' + ALEF_HAMZA_ABOVE, 'ﻸ': 'ل' + ALEF_HAMZA_ABOVE,
+      'ﻹ': 'ل' + ALEF_HAMZA_BELOW, 'ﻺ': 'ل' + ALEF_HAMZA_BELOW, 'ﻵ': 'ل' + ALEF_MADDA, 'ﻶ': 'ل' + ALEF_MADDA };
+    for (const k in lig) text = text.split(k).join(lig[k]);
+    return text.normalize('NFC');
+  }
+  const RE_SHADDA_HARAKA_ORDER = new RegExp('([' + FATHA + DAMMA + KASRA + FATHATAN + '])([' + SHADDA + '])', 'g');
+  const RE_ALEF_HARAKA = new RegExp(ALEF + '[' + FATHA + DAMMA + KASRA + ']', 'g');
+  const RE_ALEF_FATHATAN = new RegExp(ALEF + FATHATAN, 'g');
+  function normalizeOrthography(text) {
+    if (!text) return '';
+    text = text.split(WASLA).join(ALEF).split(DAGGER_ALEF).join(ALEF);
+    text = text.replace(RE_SHADDA_HARAKA_ORDER, '$2$1');
+    text = text.replace(RE_ALEF_HARAKA, ALEF);
+    text = text.replace(RE_ALEF_FATHATAN, FATHATAN + ALEF);
+    return text;
+  }
+
+  // ───────────────────────── core/phonetics ─────────────────────────
+  const ARUDI_REPLACEMENTS = [["\u0647\u0630\u0627", "\u0647\u064e\u0627\u0630\u064e\u0627"], ["\u0647\u0630\u064a", "\u0647\u064e\u0627\u0630\u0650\u064a"], ["\u0647\u0630\u0647", "\u0647\u064e\u0627\u0630\u0650\u0647\u0650\u064a"], ["\u0647\u0630\u0627\u0646", "\u0647\u064e\u0627\u0630\u064e\u0627\u0646"], ["\u0647\u0630\u064a\u0646", "\u0647\u064e\u0627\u0630\u064e\u064a\u0652\u0646"], ["\u0647\u0624\u0644\u0627\u0621", "\u0647\u064e\u0627\u0624\u064f\u0644\u064e\u0627\u0621\u0650"], ["\u0630\u0644\u0643", "\u0630\u064e\u0627\u0644\u0650\u0643\u064e"], ["\u0630\u0644\u0643\u0645\u0627", "\u0630\u064e\u0627\u0644\u0650\u0643\u064f\u0645\u064e\u0627"], ["\u0630\u0644\u0643\u0645", "\u0630\u064e\u0627\u0644\u0650\u0643\u064f\u0645"], ["\u0630\u0644\u0643\u0646", "\u0630\u064e\u0627\u0644\u0650\u0643\u064f\u0646\u0651\u064e"], ["\u0623\u0648\u0644\u0626\u0643", "\u0623\u064f\u0644\u064e\u0627\u0626\u0650\u0643\u064e"], ["\u0623\u0648\u0644\u0626\u0643\u0645", "\u0623\u064f\u0644\u064e\u0627\u0626\u0650\u0643\u064f\u0645"], ["\u0623\u0648\u0644\u0648", "\u0623\u064f\u0644\u064f\u0648"], ["\u0623\u0648\u0644\u064a", "\u0623\u064f\u0644\u0650\u064a"], ["\u0623\u0648\u0644\u0627\u062a", "\u0623\u064f\u0644\u064e\u0627\u062a"], ["\u0627\u0644\u0644\u0647", "\u0627\u0644\u0644\u0651\u064e\u0627\u0647"], ["\u0627\u0644\u0644\u0647\u0645", "\u0627\u0644\u0644\u0651\u064e\u0627\u0647\u064f\u0645\u0651\u064e"], ["\u0625\u0644\u0647", "\u0625\u0650\u0644\u064e\u0627\u0647"], ["\u0627\u0644\u0625\u0644\u0647", "\u0627\u0644\u0625\u0650\u0644\u064e\u0627\u0647"], ["\u0625\u0644\u0647\u064a", "\u0625\u0650\u0644\u064e\u0627\u0647\u0650\u064a"], ["\u0625\u0644\u0647\u0646\u0627", "\u0625\u0650\u0644\u064e\u0627\u0647\u064f\u0646\u064e\u0627"], ["\u0625\u0644\u0647\u0643\u0645", "\u0625\u0650\u0644\u064e\u0627\u0647\u064f\u0643\u064f\u0645"], ["\u0625\u0644\u0647\u0647\u0645", "\u0625\u0650\u0644\u064e\u0627\u0647\u064f\u0647\u064f\u0645"], ["\u0625\u0644\u0647\u0647\u0646", "\u0625\u0650\u0644\u064e\u0627\u0647\u064f\u0647\u064f\u0646\u0651\u064e"], ["\u0631\u062d\u0645\u0646", "\u0631\u064e\u062d\u0652\u0645\u064e\u0627\u0646"], ["\u0627\u0644\u0631\u062d\u0645\u0646", "\u0627\u0644\u0631\u0651\u064e\u062d\u0652\u0645\u064e\u0627\u0646"], ["\u0637\u0627\u0648\u0633", "\u0637\u064e\u0627\u0648\u064f\u0648\u0633"], ["\u062f\u0627\u0648\u062f", "\u062f\u064e\u0627\u0648\u064f\u0648\u062f"], ["\u0646\u0627\u0648\u0633", "\u0646\u064e\u0627\u0648\u064f\u0648\u0633"], ["\u0647\u0627\u0631\u0648\u0646", "\u0647\u064e\u0627\u0631\u064f\u0648\u0646"], ["\u0644\u0643\u0646", "\u0644\u064e\u0627\u0643\u0650\u0646"], ["\u0644\u0643\u0646\u0651", "\u0644\u064e\u0627\u0643\u0650\u0646\u0651\u064e"], ["\u0644\u0643\u0646\u0647", "\u0644\u064e\u0627\u0643\u0650\u0646\u0651\u064e\u0647\u064f\u0648"], ["\u0644\u0643\u0646\u0647\u0627", "\u0644\u064e\u0627\u0643\u0650\u0646\u0651\u064e\u0647\u064e\u0627"], ["\u0637\u0647", "\u0637\u064e\u0627\u0647\u064e\u0627"], ["\u064a\u0633", "\u064a\u064e\u0627\u0633\u0650\u064a\u0646"], ["\u0644\u0644\u0647", "\u0644\u0650\u0644\u0651\u064e\u0627\u0647"], ["\u0628\u0627\u0644\u0644\u0647", "\u0628\u0650\u0627\u0644\u0644\u0651\u064e\u0627\u0647"], ["\u0648\u0627\u0644\u0644\u0647", "\u0648\u064e\u0627\u0644\u0644\u0651\u064e\u0627\u0647"], ["\u062a\u0627\u0644\u0644\u0647", "\u062a\u064e\u0627\u0644\u0644\u0651\u064e\u0627\u0647"], ["\u0622\u0647", "\u0623\u064e\u0627\u0647\u0650"], ["\u0639\u0645\u0631\u0648", "\u0639\u064e\u0645\u0652\u0631"], ["\u0645\u0627\u0626\u0629", "\u0645\u0650\u0626\u064e\u0629"], ["\u0645\u0627\u0626\u062a\u0627\u0646", "\u0645\u0650\u0626\u064e\u062a\u064e\u0627\u0646"], ["\u0645\u0627\u0626\u062a\u064a\u0646", "\u0645\u0650\u0626\u064e\u062a\u064e\u064a\u0652\u0646"]];
+  const REPL_MAP = new Map(ARUDI_REPLACEMENTS);
+  const SPECIAL_REPL = [["\u0627\u0644\u0644\u0647", "\u0627\u0644\u0644\u0627\u0647"], ["\u0627\u0644\u0644\u0651\u0647", "\u0627\u0644\u0644\u0627\u0647"], ["\u0625\u0644\u0651\u064e\u0627", "\u0625\u0650\u0644\u0651\u064e\u0627"], ["\u0646\u0652 \u0627\u0644", "\u0646\u064e \u0627\u0644"], ["\u0644\u0652 \u0627\u0644", "\u0644\u0650 \u0627\u0644"], ["\u0652 \u0627\u0644", "\u0650 \u0627\u0644"], ["\u0639\u064e\u0645\u0652\u0631\u064d\u0648", "\u0639\u064e\u0645\u0652\u0631\u064d"], ["\u0639\u064e\u0645\u0652\u0631\u064f\u0648", "\u0639\u064e\u0645\u0652\u0631\u064f"], ["\u0639\u064e\u0645\u0652\u0631\u064c\u0648", "\u0639\u064e\u0645\u0652\u0631\u064c"]];
+  const VALID_PREFIXES = new Set(['و', 'ف', 'ك', 'ب', 'ل', 'وب', 'فك', 'ول', 'فل']);
+  const PREFIX_HARAKAT = { 'و': 'وَ', 'ف': 'فَ', 'ك': 'كَ', 'ب': 'بِ', 'ل': 'لِ' };
+
+  const RE_LONG_VOWEL_WASL = /([^\s]\S*)([اىيو])\s+ا/g;
+  const RE_SPACE_WASL = /\s+ا/g;
+  const RE_ALLAH_PREFIX = new RegExp('([فوبتك])([' + FATHA + DAMMA + KASRA + ']?)ا(لل)', 'g');
+  const RE_DETACH_AL = /(^|\s)([فوبتك])([َُِ])?ال/g;
+  const RE_SOLAR_LAM = new RegExp(' ال([' + SUN_LETTERS + '])', 'g');
+  const RE_MULTI_SPACES = / +/g;
+  const RE_DOUBLE_HARAKA = new RegExp('([' + FATHA + DAMMA + KASRA + '])([' + FATHA + DAMMA + KASRA + ']+)', 'g');
+  const RE_NORM_SHADDA = new RegExp('([' + HARAKAT.concat(TANWEEN).join('') + '])([' + SHADDA + '])', 'g');
+  const STRIP_HARAKAT_RE = new RegExp('[' + HARAKAT.concat(TANWEEN, [SUKUN]).join('') + ']', 'g');
+  const PREM_CHARS = new Set(HARAKAT.concat([SUKUN], LONG_VOWELS, TANWEEN, [SHADDA], LETTERS.split(''), [' ']));
+
+  function processSpecialsBefore(bait) {
+    if (bait && bait[0] === ALEF) bait = ALEF_HAMZA_ABOVE + FATHA + bait.slice(1);
+    bait = bait.replace(RE_DETACH_AL, (m, a, b, c) => a + b + (c || '') + ' ال');
+    // Lam syamsiyyah: gugurkan lam & GANDAKAN huruf syamsi walaupun shaddah tidak ditulis (الرَعد → ارّعد)
+    bait = bait.replace(RE_SOLAR_LAM, (m, L, off, str) => {
+      const rest = str.slice(off + m.length);
+      if (L === 'ل' && /^[\u064B-\u0652]*ه/.test(rest)) return m; // lafaz الله — biar jadual penggantian urus
+      return ' ا' + L + (L === 'ل' || rest[0] === SHADDA ? '' : SHADDA);
+    });
+    bait = bait.split('وا ').join('و ');
+    if (bait.endsWith('وا')) bait = bait.slice(0, -1);
+    bait = bait.split('وْا').join('و');
+    if (bait.endsWith('وْا')) bait = bait.slice(0, -2) + 'و';
+    for (const [k, v] of SPECIAL_REPL) bait = bait.split(k).join(v);
+
+    const out = [];
+    for (const word of bait.split(' ')) {
+      if (!word) continue;
+      const cands = [word.replace(STRIP_HARAKAT_RE, ''), stripTashkeel(word)];
+      let found = false;
+      const endMark = (word.match(/[\u064B-\u0650]$/) || [''])[0]; // kekalkan baris akhir asal (cth. اللَّهُ)
+      const keepEnd = r => (endMark && !/[\u064B-\u0652]$/.test(r)) ? r + endMark : r;
+      for (const c of cands) if (REPL_MAP.has(c)) { out.push(keepEnd(REPL_MAP.get(c))); found = true; break; }
+      if (found) continue;
+      for (const c of cands) {
+        if (found) break;
+        for (const [key, rep] of ARUDI_REPLACEMENTS) {
+          if (key.length < 3) continue; // يس/طه: elak ليس → ليٰسين
+          if (c.endsWith(key) && c.length > key.length) {
+            const prefix = c.slice(0, -key.length);
+            if (VALID_PREFIXES.has(prefix)) {
+              out.push(keepEnd(prefix.split('').map(p => PREFIX_HARAKAT[p] || p).join('') + rep));
+              found = true; break;
+            }
+          }
+        }
+      }
+      if (!found) out.push(word);
+    }
+    bait = out.join(' ');
+    if (bait.length > 1 && LETTERS_SET.has(bait[0]) && LETTERS_SET.has(bait[1]) && bait[1] !== ' ' &&
+      ![ALEF, WAW, YEH, ALEF_MAKSURA].includes(bait[1])) bait = bait[0] + FATHA + bait.slice(1);
+
+    let fin = '', i = 0;
+    while (i < bait.length) {
+      if (bait[i] === ALEF && i > 0 && TANWEEN_SET.has(bait[i - 1])) {
+        i++;
+        while (i < bait.length && PREM_CHARS.has(bait[i]) && !LETTERS_SET.has(bait[i])) i++;
+        continue;
+      }
+      fin += bait[i]; i++;
+    }
+    return fin;
+  }
+
+  function resolveWasl(text) {
+    text = text.replace(RE_LONG_VOWEL_WASL, '$1');
+    text = text.replace(RE_SPACE_WASL, '');
+    text = text.replace(RE_ALLAH_PREFIX, '$1$2$3');
+    return text;
+  }
+
+  function extractPattern(text, saturate, muqayyad) {
+    text = text.replace(RE_DOUBLE_HARAKA, '$1');
+    text = text.split(ALEF_MADDA).join('ءَ' + ALEF);
+    let tmp = ''; for (const c of text) if (PREM_CHARS.has(c)) tmp += c;
+    const chars = Array.from(tmp.replace(RE_MULTI_SPACES, ' ').trim());
+    const out = [], plain = [];
+    let i = 0; const n = chars.length;
+    while (i < n) {
+      const ch = chars[i];
+      let next = i + 1 < n ? chars[i + 1] : '';
+      const nextNext = i + 2 < n ? chars[i + 2] : '';
+      const prev = out.length ? out[out.length - 1] : '';
+      if (ch === ' ') { plain.push(' '); i++; continue; }
+      if (ch === ALEF || ch === ALEF_MAKSURA) { if (prev !== '0') out.push('0'); plain.push(ch); i++; continue; }
+      if (LETTERS_SET.has(ch)) {
+        if (next === ' ' && nextNext) next = nextNext;
+        if (HARAKAT_SET.has(next)) {
+          const isLast = i + 2 >= n;
+          out.push(muqayyad && isLast ? '0' : '1'); plain.push(ch);
+        } else if (next === SUKUN) {
+          if (prev !== '0' || (i + 1) === n - 1) { out.push('0'); plain.push(ch); }
+          else { if (plain.length && plain[plain.length - 1] === ' ') plain.pop(); plain.push(ch); }
+        } else if (TANWEEN_SET.has(next)) {
+          if (ch !== ALEF) plain.push(ch);
+          plain.push(NOON); out.push('1', '0');
+          if (i + 2 < n && chars[i + 2] === ALEF) i += 1;
+        } else if (next === SHADDA) {
+          if (prev !== '0') { plain.push(ch, ch); out.push('0', '1'); }
+          else { if (plain.length && plain[plain.length - 1] === ' ') plain.pop(); plain.push(ch, ch); out.push('1'); }
+          if (i + 2 < n) {
+            if (HARAKAT_SET.has(chars[i + 2])) {
+              const isLastSh = i + 3 >= n;
+              if (muqayyad && isLastSh) out[out.length - 1] = '0';
+              i += 1;
+            } else if (TANWEEN_SET.has(chars[i + 2])) {
+              i += 1; plain.push(NOON); out.push('0');
+              if (i + 2 < n && chars[i + 2] === ALEF) i += 1;
+            }
+          }
+        } else if (next === ALEF || next === ALEF_MAKSURA) {
+          out.push('1', '0'); plain.push(ch, next);
+        } else if (LETTERS_SET.has(next)) {
+          if (prev !== '0') { out.push('0'); plain.push(ch); }
+          else if (prev === '0' && i + 1 < n && chars[i + 1] === ' ') { out.push('1'); plain.push(ch); }
+          else { if (plain.length && plain[plain.length - 1] === ' ') plain.pop(); plain.push(ch); out.push('0'); }
+          i -= 1;
+        } else {
+          out.push(prev !== '0' ? '0' : '1'); plain.push(ch); i += 1; continue;
+        }
+        if (!muqayyad && nextNext === ' ' && out.length >= 2 && out[out.length - 2] === '1') {
+          const isAllah = plain.length >= 3 && plain.slice(-4, -1).join('') === 'للا';
+          if (ch === 'ه' && !isAllah) {
+            if (next === KASRA) { plain.push(YEH); out.push('0'); }
+            else if (next === DAMMA) { plain.push(WAW); out.push('0'); }
+          }
+        }
+        i += 2;
+      } else i += 1;
+    }
+    let pat = out.join(''), arudi = plain.join('');
+    if (!muqayyad && saturate && pat && pat[pat.length - 1] !== '0') pat += '0';
+    if (!muqayyad && saturate && n) {
+      const last = chars[n - 1];
+      if (last === KASRA) arudi += YEH;
+      else if (last === KASRATAN) arudi = arudi.endsWith(NOON) ? arudi.slice(0, -1) + YEH : arudi + YEH;
+      else if (last === FATHA) arudi += ALEF;
+      else if (last === DAMMA) arudi += WAW;
+      else if (last === DAMMATAN) arudi = arudi.endsWith(NOON) ? arudi.slice(0, -1) + WAW : arudi + WAW;
+      else if (LONG_VOWELS_SET.has(last) && n > 1 && !TANWEEN_SET.has(chars[n - 2])) arudi += last;
+    }
+    return [arudi, pat];
+  }
+
+
+  // Pelengkap baris konservatif (gaya dīwān): huruf tanpa baris sebelum mad di hujung kata / sebelum alif.
+  const MARKS = new Set([FATHA, DAMMA, KASRA, SUKUN, SHADDA, FATHATAN, DAMMATAN, KASRATAN]);
+  function completeMadd(text) {
+    return text.split(/(\s+)/).map(w => {
+      if (/^\s+$/.test(w) || !w) return w;
+      const ch = Array.from(w), n = ch.length;
+      const letters = ch.filter(c => LETTERS_SET.has(c)).length;
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const c = ch[i]; out.push(c);
+        if (!LETTERS_SET.has(c) || c === ALEF || c === ALEF_MAKSURA) continue;
+        if (i + 1 < n && MARKS.has(ch[i + 1])) continue;          // sudah berbaris
+        const nx = ch[i + 1], after = ch[i + 2];
+        const nxFinal = i + 2 >= n;
+        if (nx === ALEF && !(after && MARKS.has(after))) {
+          if (nxFinal && c === WAW) continue;                      // واو الجماعة: قالوا
+          if (i === 0 && 'وفبكل'.includes(c) && after === 'ل') continue; // بال/وال/فال
+          if (after === FATHATAN) continue;
+          out.push(FATHA); continue;
+        }
+        if (nxFinal && nx === ALEF_MAKSURA && i > 0) { out.push(FATHA); continue; }
+        if (letters >= 3 && nxFinal && nx === YEH && i > 0) { out.push(KASRA); continue; }
+        if (letters >= 3 && nxFinal && nx === WAW && i > 0) { out.push(DAMMA); continue; }
+      }
+      return out.join('');
+    }).join('');
+  }
+
+  function prepareText(text, saturate, muqayyad) {
+    text = (text || '').trim();
+    if (!text) return ['', ''];
+    text = text.split(ALEF_MADDA).join('ءَ' + ALEF);
+    text = completeMadd(text);
+    text = normalizeOrthography(text);
+    text = normalizeLigatures(text);
+    text = text.replace(RE_NORM_SHADDA, '$2$1');
+    let pre = processSpecialsBefore(text);
+    pre = resolveWasl(pre);
+    let [arudi, pat] = extractPattern(pre, saturate !== false, !!muqayyad);
+    arudi = arudi.split('ةن').join('تن');
+    return [arudi, pat];
+  }
+
+  // ───────────────────────── meters/zihaf ─────────────────────────
+  const del = (p, idx) => { p = p.slice(); if (idx >= 0 && idx < p.length) p.splice(idx, 1); return p; };
+  const tsk = (p, idx) => { p = p.slice(); if (p[idx] === 1) p[idx] = 0; return p; };
+  const endsWith = (p, arr) => p.length >= arr.length && arr.every((v, k) => p[p.length - arr.length + k] === v);
+  const Z = {};
+  function defZ(key, ar, en, fn) { Z[key] = { key, ar, en, fn }; }
+  defZ('NoZehafNorEllah', 'سالمة (صحيحة)', 'Salim / Sahih', p => p);
+  defZ('Khaban', 'مخبونة (الخبن)', 'Khaban', p => del(p, 1));
+  defZ('Tay', 'مطوية (الطي)', 'Tay', p => del(p, 3));
+  defZ('Waqas', 'موقوصة (الوقص)', 'Waqas', p => del(p, 1));
+  defZ('Qabadh', 'مقبوضة (القبض)', 'Qabadh', p => del(p, 4));
+  defZ('Kaff', 'مكفوفة (الكف)', 'Kaff', p => del(p, 6));
+  defZ('Akal', 'معقولة (العقل)', 'Aql', p => del(p, 4));
+  defZ('Kasf', 'مكسوفة (الكسف)', 'Kasf', p => del(p, 6));
+  defZ('Tasheeth', 'مشعثة (التشعيث)', 'Tasheeth', p => del(p, 2));
+  defZ('Thalm', 'أثلم (الثلم)', 'Thalm', p => del(p, 0));
+  defZ('Edmaar', 'مضمرة (الإضمار)', 'Edmaar', p => tsk(p, 1));
+  defZ('Asab', 'معصوبة (العصب)', 'Asab', p => tsk(p, 4));
+  const dbl = (dels, tsks) => p => { [...dels].sort((a, b) => b - a).forEach(d => { p = del(p, d); }); tsks.forEach(t => { p = tsk(p, t); }); return p; };
+  defZ('Khabal', 'مخبولة (الخبل)', 'Khabal', dbl([1, 3], []));
+  defZ('Khazal', 'مخزولة (الخزل)', 'Khazal', dbl([3], [1]));
+  defZ('Shakal', 'مشكولة (الشكل)', 'Shakal', dbl([1, 6], []));
+  defZ('Nakas', 'منقوصة (النقص)', 'Nakas', dbl([6], [4]));
+  defZ('TayAndKasf', 'مطوية مكسوفة', 'Tay and Kasf', dbl([3, 6], []));
+  defZ('Tharm', 'أثرم (الثرم)', 'Tharm', dbl([0, 4], []));
+  const tarfeel = p => p.concat([1, 0]);
+  const tatheel = p => endsWith(p, [1, 0]) ? p.concat([0]) : p.slice();
+  const hadhf = p => endsWith(p, [1, 0]) ? p.slice(0, -2) : p.slice();
+  const qataa = p => { if (endsWith(p, [1, 0])) { p = p.slice(0, -1); p[p.length - 1] = 0; return p; } return p.slice(); };
+  const hathath = p => endsWith(p, [1, 1, 0]) ? p.slice(0, -3) : p.slice();
+  defZ('Tarfeel', 'مرفلة (الترفيل)', 'Tarfeel', tarfeel);
+  defZ('Tatheel', 'مذيلة (التذييل)', 'Tatheel', tatheel);
+  defZ('Tasbeegh', 'مسبغة (التسبيغ)', 'Tasbeegh', tatheel);
+  defZ('TatheelAndEdmaar', 'مذيلة مضمرة', 'Tatheel and Edmaar', p => tsk(tatheel(p), 1));
+  defZ('TarfeelAndEdmaar', 'مرفلة مضمرة', 'Tarfeel and Edmaar', p => tsk(tarfeel(p), 1));
+  defZ('TarfeelAndKhaban', 'مرفلة مخبونة', 'Tarfeel and Khaban', p => tarfeel(del(p, 1)));
+  defZ('Hadhf', 'محذوفة (الحذف)', 'Hadhf', hadhf);
+  defZ('HadhfAndKhaban', 'محذوفة مخبونة', 'Hadhf and Khaban', p => del(hadhf(p), 1));
+  defZ('Qataf', 'مقطوفة (القطف)', 'Qataf', p => tsk(hadhf(p), 4));
+  defZ('Qataa', 'مقطوعة (القطع)', 'Qataa', qataa);
+  defZ('KhabanAndQataa', 'مقطوعة مخبونة', 'Khaban and Qataa', p => del(qataa(p), 1));
+  defZ('QataaAndEdmaar', 'مقطوعة مضمرة', 'Qataa and Edmaar', p => tsk(qataa(p), 1));
+  defZ('Hathath', 'حذاء (الحذذ)', 'Hathath', hathath);
+  defZ('HathathAndEdmaar', 'حذاء مضمرة', 'Hathath and Edmaar', p => tsk(hathath(p), 1));
+  defZ('Salam', 'أصلم (الصلم)', 'Salam', p => endsWith(p, [1, 0, 1]) ? p.slice(0, -3) : p.slice());
+  const waqf = p => { p = p.slice(); if (endsWith(p, [1, 0, 1])) p[p.length - 1] = 0; return p; };
+  defZ('Waqf', 'موقوفة (الوقف)', 'Waqf', waqf);
+  defZ('WaqfAndTay', 'موقوفة مطوية', 'Waqf and Tay', p => waqf(del(p, 3)));
+  defZ('KhabalAndKasf', 'مخبولة مكسوفة', 'Khabal and Kasf', p => del(Z.Khabal.fn(p), 4));
+  defZ('Qasar', 'مقصورة (القصر)', 'Qasar', qataa);
+  defZ('ThalmAndQasar', 'أثلم مقصور', 'Thalm and Qasar', p => qataa(del(p, 0)));
+  defZ('Aql', 'معقولة (العقل)', 'Aql', p => del(tsk(hadhf(p), 4), 1));
+  defZ('Batr', 'أبتر (البتر)', 'Batr', p => qataa(hadhf(p)));
+
+  const ZIHAF_COST = { NoZehafNorEllah: 0, Khaban: 1, Edmaar: 1, Tay: 1, Qabadh: 1, Asab: 1, Kaff: 2, Aql: 2, Waqs: 2,
+    Khabal: 3, Khazl: 3, Shakal: 3, Hadhf: 1, Qataa: 1, Qasar: 1, Tatheel: 1, Tarfeel: 1, Tasbeegh: 1, Tasheeth: 1,
+    Qataf: 1, Kasf: 1, Waqf: 1, Salam: 1, Batr: 2, Hathath: 2, Thalm: 2, Tharm: 2, HadhfAndKhaban: 2, KhabanAndQataa: 2,
+    QataaAndEdmaar: 2, TarfeelAndEdmaar: 2, TarfeelAndKhaban: 2, TatheelAndEdmaar: 2, TayAndKasf: 2, KhabalAndKasf: 2,
+    WaqfAndTay: 2, HathathAndEdmaar: 2, ThalmAndQasar: 2 };
+
+  // ───────────────────────── meters/tafeela ─────────────────────────
+  const T = {
+    Fawlon: { name: 'فعولن', pat: '11010', z: ['Qabadh', 'Thalm', 'Tharm'] },
+    Faelon: { name: 'فاعلن', pat: '10110', z: ['Khaban', 'Tasheeth'] },
+    Mafaeelon: { name: 'مفاعيلن', pat: '1101010', z: ['Qabadh', 'Kaff'] },
+    Mustafelon: { name: 'مستفعلن', pat: '1010110', z: ['Khaban', 'Tay', 'Khabal'] },
+    Mutafaelon: { name: 'متفاعلن', pat: '1110110', z: ['Edmaar', 'Waqas', 'Khazal'] },
+    Mafaelaton: { name: 'مفاعلتن', pat: '1101110', z: ['Asab', 'Akal', 'Nakas'] },
+    Mafoolato: { name: 'مفعولات', pat: '1010101', z: ['Khaban', 'Tay', 'Khabal', 'Kasf'] },
+    Fae_laton: { name: 'فاع لاتن', pat: '1011010', z: ['Kaff'] },
+    Mustafe_lon: { name: 'مستفع لن', pat: '1010110', z: ['Khaban', 'Kaff', 'Tay', 'Shakal'] },
+    Faelaton: { name: 'فاعلاتن', pat: '1011010', z: ['Khaban', 'Kaff', 'Shakal'] }
+  };
+  const basePat = t => t.pat.split('').map(Number);
+  function makeForm(t, zkey) { // returns {name, pattern(str), applied}
+    const p = zkey ? Z[zkey].fn(basePat(t)) : basePat(t);
+    return { name: t.name, pattern: p.join(''), applied: zkey && zkey !== 'NoZehafNorEllah' ? zkey : null };
+  }
+  function allForms(t) { return [makeForm(t, null)].concat(t.z.map(k => makeForm(t, k))); }
+
+  // ───────────────────────── meters/bahr ─────────────────────────
+  // map: {dict: [[arudh,[dharbs]],...]} atau {set: [...]}
+  const B = {};
+  function defB(id, o) { B[id] = Object.assign({ id, bahr_type: 'tam', only_one_shatr: false, disallowed: {}, subs: [] }, o); }
+  const RJ = ['NoZehafNorEllah', 'Khaban', 'Tay', 'Khabal', 'Qataa', 'KhabanAndQataa'];
+  defB('RajazManhook', { ar: 'منهوك الرجز', en: 'Rajaz Manhook', key: 'rajaz', bahr_type: 'manhook', taf: ['Mustafelon', 'Mustafelon'], map: { set: RJ }, only_one_shatr: true });
+  defB('RajazMashtoor', { ar: 'مشطور الرجز', en: 'Rajaz Mashtoor', key: 'rajaz', bahr_type: 'mashtoor', taf: ['Mustafelon', 'Mustafelon', 'Mustafelon'], map: { set: RJ }, only_one_shatr: true });
+  const RJM = ['NoZehafNorEllah', 'Khaban', 'Tay', 'Khabal'];
+  defB('RajazMajzoo', { ar: 'مجزوء الرجز', en: 'Rajaz Majzoo', key: 'rajaz', bahr_type: 'majzoo', taf: ['Mustafelon', 'Mustafelon'], map: { dict: RJM.map(a => [a, RJM]) } });
+  const RMM = ['NoZehafNorEllah', 'Khaban', 'Tasbeegh', 'Hadhf', 'HadhfAndKhaban'];
+  defB('RamalMajzoo', { ar: 'مجزوء الرمل', en: 'Ramal Majzoo', key: 'ramal', bahr_type: 'majzoo', taf: ['Faelaton', 'Faelaton'], map: { dict: [['NoZehafNorEllah', RMM], ['Khaban', RMM]] }, disallowed: { 0: [['Tasheeth']], 1: [['Tasheeth']] } });
+  defB('SareeMashtoor', { ar: 'مشطور السريع', en: 'Saree Mashtoor', key: 'saree', bahr_type: 'mashtoor', taf: ['Mustafelon', 'Mustafelon', 'Mafoolato'], map: { set: ['Waqf', 'Kasf'] }, only_one_shatr: true });
+  defB('MunsarehManhook', { ar: 'منهوك المنسرح', en: 'Munsareh Manhook', key: 'munsareh', bahr_type: 'manhook', taf: ['Mustafelon', 'Mafoolato'], map: { set: ['Waqf', 'Kasf'] }, only_one_shatr: true });
+  const KFM = ['NoZehafNorEllah', 'Khaban', 'KhabanAndQataa'];
+  defB('KhafeefMajzoo', { ar: 'مجزوء الخفيف', en: 'Khafeef Majzoo', key: 'khafeef', bahr_type: 'majzoo', taf: ['Faelaton', 'Mustafe_lon'], map: { dict: [['NoZehafNorEllah', KFM], ['Khaban', KFM]] }, disallowed: { 0: [['Kaff', 'Shakal', 'Tasheeth']], 1: [['Kaff', 'Shakal', 'Tasheeth']] } });
+  defB('MutakarebMajzoo', { ar: 'مجزوء المتقارب', en: 'Mutakareb Majzoo', key: 'mutakareb', bahr_type: 'majzoo', taf: ['Fawlon', 'Fawlon', 'Fawlon'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah', 'Hadhf', 'Batr']], ['Hadhf', ['Hadhf', 'Batr']]] }, disallowed: { 0: [[], ['Thalm', 'Tharm']], 1: [['Thalm', 'Tharm'], ['Thalm', 'Tharm']] } });
+  const MDS = ['NoZehafNorEllah', 'Khaban', 'Tasheeth', 'Tatheel', 'TarfeelAndKhaban'];
+  defB('MutadarakMashtoor', { ar: 'مشطور المتدارك', en: 'Mutadarak Mashtoor', key: 'mutadarak', bahr_type: 'mashtoor', taf: ['Faelon', 'Faelon', 'Faelon'], map: { set: MDS }, only_one_shatr: true });
+  defB('MutadarakMajzoo', { ar: 'مجزوء المتدارك', en: 'Mutadarak Majzoo', key: 'mutadarak', bahr_type: 'majzoo', taf: ['Faelon', 'Faelon', 'Faelon'], map: { dict: [['NoZehafNorEllah', MDS], ['Khaban', MDS], ['Tasheeth', MDS]] } });
+  defB('BaseetMajzoo', { ar: 'مجزوء البسيط', en: 'Baseet Majzoo', key: 'baseet', bahr_type: 'majzoo', taf: ['Mustafelon', 'Faelon', 'Mustafelon'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah', 'Tatheel', 'Qataa']], ['Qataa', ['NoZehafNorEllah']]] }, disallowed: { 0: [[], ['Tasheeth']], 1: [[], ['Tasheeth']] } });
+  defB('BaseetMukhalla', { ar: 'مخلع البسيط', en: 'Baseet Mukhalla', key: 'baseet', bahr_type: 'mukhalla', taf: ['Mustafelon', 'Faelon', 'Mustafelon'], map: { dict: [['KhabanAndQataa', ['KhabanAndQataa']]] }, disallowed: { 0: [[], ['Tasheeth']], 1: [[], ['Tasheeth']] } });
+  defB('WaferMajzoo', { ar: 'مجزوء الوافر', en: 'Wafer Majzoo', key: 'wafer', bahr_type: 'majzoo', taf: ['Mafaelaton', 'Mafaelaton'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah', 'Asab']], ['Asab', ['NoZehafNorEllah', 'Asab']]] } });
+  const KMM = ['NoZehafNorEllah', 'Edmaar', 'Qataa', 'QataaAndEdmaar', 'Tatheel', 'TatheelAndEdmaar', 'Tarfeel', 'TarfeelAndEdmaar'];
+  defB('KamelMajzoo', { ar: 'مجزوء الكامل', en: 'Kamel Majzoo', key: 'kamel', bahr_type: 'majzoo', taf: ['Mutafaelon', 'Mutafaelon'], map: { dict: [['NoZehafNorEllah', KMM], ['Edmaar', KMM]] } });
+
+  defB('Taweel', { ar: 'بحر الطويل', en: 'Al-Taweel', key: 'taweel', taf: ['Fawlon', 'Mafaeelon', 'Fawlon', 'Mafaeelon'], map: { dict: [['Qabadh', ['Qabadh', 'Hadhf', 'NoZehafNorEllah']]] }, disallowed: { 0: [[], [], ['Thalm', 'Tharm']], 1: [['Thalm', 'Tharm'], [], ['Thalm', 'Tharm']] } });
+  defB('Madeed', { ar: 'بحر المديد', en: 'Al-Madeed', key: 'madeed', taf: ['Faelaton', 'Faelon', 'Faelaton'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah']], ['Hadhf', ['Hadhf', 'Batr']], ['HadhfAndKhaban', ['HadhfAndKhaban']], ['Batr', ['Batr']]] }, disallowed: { 0: [['Shakal', 'Tasheeth'], ['Tasheeth']], 1: [['Shakal', 'Tasheeth'], ['Tasheeth']] } });
+  defB('Baseet', { ar: 'بحر البسيط', en: 'Al-Baseet', key: 'baseet', taf: ['Mustafelon', 'Faelon', 'Mustafelon', 'Faelon'], map: { dict: [['Khaban', ['Khaban', 'Qataa']]] }, disallowed: { 0: [[], ['Tasheeth'], []], 1: [[], ['Tasheeth'], []] }, subs: ['BaseetMajzoo', 'BaseetMukhalla'] });
+  defB('Wafer', { ar: 'بحر الوافر', en: 'Al-Wafer', key: 'wafer', taf: ['Mafaelaton', 'Mafaelaton', 'Mafaelaton'], map: { dict: [['Qataf', ['Qataf', 'Aql']]] }, subs: ['WaferMajzoo'] });
+  const KM = ['NoZehafNorEllah', 'Edmaar', 'Qataa', 'QataaAndEdmaar', 'HathathAndEdmaar'];
+  defB('Kamel', { ar: 'بحر الكامل', en: 'Al-Kamel', key: 'kamel', taf: ['Mutafaelon', 'Mutafaelon', 'Mutafaelon'], map: { dict: [['NoZehafNorEllah', KM], ['Edmaar', KM], ['Hathath', ['Hathath', 'HathathAndEdmaar']]] }, subs: ['KamelMajzoo'] });
+  defB('Hazaj', { ar: 'بحر الهزج', en: 'Al-Hazaj', key: 'hazaj', taf: ['Mafaeelon', 'Mafaeelon'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah', 'Hadhf']], ['Kaff', ['NoZehafNorEllah', 'Hadhf']]] }, disallowed: { 0: [['Qabadh']], 1: [['Qabadh']] } });
+  defB('Rajaz', { ar: 'بحر الرجز', en: 'Al-Rajaz', key: 'rajaz', taf: ['Mustafelon', 'Mustafelon', 'Mustafelon'], map: { dict: RJM.map(a => [a, RJ]) }, subs: ['RajazMajzoo', 'RajazMashtoor', 'RajazManhook'] });
+  const RM1 = ['NoZehafNorEllah', 'Khaban', 'Hadhf', 'HadhfAndKhaban', 'Qataa', 'KhabanAndQataa'];
+  const RM2 = ['NoZehafNorEllah', 'Khaban', 'Hadhf', 'HadhfAndKhaban', 'Qasar', 'KhabanAndQataa'];
+  defB('Ramal', { ar: 'بحر الرمل', en: 'Al-Ramal', key: 'ramal', taf: ['Faelaton', 'Faelaton', 'Faelaton'], map: { dict: [['NoZehafNorEllah', RM1], ['Khaban', RM1], ['Hadhf', RM2], ['HadhfAndKhaban', RM1]] }, subs: ['RamalMajzoo'], disallowed: { 0: [['Tasheeth'], ['Tasheeth']], 1: [['Tasheeth'], ['Tasheeth']] } });
+  defB('Saree', { ar: 'بحر السريع', en: 'Al-Saree', key: 'saree', taf: ['Mustafelon', 'Mustafelon', 'Mafoolato'], map: { dict: [['TayAndKasf', ['TayAndKasf', 'Salam', 'WaqfAndTay']], ['KhabalAndKasf', ['KhabalAndKasf', 'Salam']]] }, subs: ['SareeMashtoor'] });
+  defB('Munsareh', { ar: 'بحر المنسرح', en: 'Al-Munsareh', key: 'munsareh', taf: ['Mustafelon', 'Mafoolato', 'Mustafelon'], map: { dict: [['Tay', ['Tay', 'Qataa']]] }, subs: ['MunsarehManhook'] });
+  const KF = ['NoZehafNorEllah', 'Khaban', 'Tasheeth', 'Hadhf', 'HadhfAndKhaban'];
+  defB('Khafeef', { ar: 'بحر الخفيف', en: 'Al-Khafeef', key: 'khafeef', taf: ['Faelaton', 'Mustafe_lon', 'Faelaton'], map: { dict: [['NoZehafNorEllah', KF], ['Khaban', KF], ['Hadhf', KF]] }, subs: ['KhafeefMajzoo'], disallowed: { 0: [['Kaff', 'Shakal'], []], 1: [['Kaff', 'Shakal'], []] } });
+  defB('Mudhare', { ar: 'بحر المضارع', en: 'Al-Mudhare', key: 'mudhare', bahr_type: 'majzoo', taf: ['Mafaeelon', 'Fae_laton'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah']]] } });
+  defB('Muqtadheb', { ar: 'بحر المقتضب', en: 'Al-Muqtadheb', key: 'muqtadheb', bahr_type: 'majzoo', taf: ['Mafoolato', 'Mustafelon'], map: { dict: [['Tay', ['Tay']], ['Khabal', ['Tay']]] }, disallowed: { 0: [[]], 1: [[]] } });
+  defB('Mujtath', { ar: 'بحر المجتث', en: 'Al-Mujtath', key: 'mujtath', bahr_type: 'majzoo', taf: ['Mustafe_lon', 'Faelaton'], map: { dict: [['NoZehafNorEllah', ['NoZehafNorEllah', 'Khaban', 'Tasheeth']], ['Khaban', ['NoZehafNorEllah', 'Khaban', 'Tasheeth']]] }, disallowed: { 0: [['Kaff']], 1: [['Kaff']] } });
+  const MT = ['NoZehafNorEllah', 'Hadhf', 'Qataa', 'Batr', 'Qasar', 'ThalmAndQasar'];
+  defB('Mutakareb', { ar: 'بحر المتقارب', en: 'Al-Mutakareb', key: 'mutakareb', taf: ['Fawlon', 'Fawlon', 'Fawlon', 'Fawlon'], map: { dict: [['NoZehafNorEllah', MT], ['Qabadh', MT], ['Hadhf', MT]] }, disallowed: { 0: [[], ['Thalm', 'Tharm'], ['Thalm', 'Tharm']], 1: [['Thalm', 'Tharm'], ['Thalm', 'Tharm'], ['Thalm', 'Tharm']] }, subs: ['MutakarebMajzoo'] });
+  const MD = ['NoZehafNorEllah', 'Khaban', 'Tasheeth'];
+  defB('Mutadarak', { ar: 'بحر المتدارك', en: 'Al-Mutadarak', key: 'mutadarak', taf: ['Faelon', 'Faelon', 'Faelon', 'Faelon'], map: { dict: [['NoZehafNorEllah', MD], ['Khaban', MD], ['Tasheeth', MD]] }, subs: ['MutadarakMajzoo', 'MutadarakMashtoor'] });
+
+  const ALL_METERS = { taweel: 'Taweel', madeed: 'Madeed', baseet: 'Baseet', wafer: 'Wafer', kamel: 'Kamel', hazaj: 'Hazaj',
+    rajaz: 'Rajaz', ramal: 'Ramal', saree: 'Saree', munsareh: 'Munsareh', khafeef: 'Khafeef', mudhare: 'Mudhare',
+    muqtadheb: 'Muqtadheb', mujtath: 'Mujtath', mutakareb: 'Mutakareb', mutadarak: 'Mutadarak' };
+
+  function hashwForms(b, shatrIdx) {
+    const res = [];
+    for (let i = 0; i < b.taf.length - 1; i++) {
+      let forms = allForms(T[b.taf[i]]);
+      const dis = b.disallowed[shatrIdx];
+      if (dis && i < dis.length) forms = forms.filter(f => !dis[i].includes(f.applied));
+      res.push(forms);
+    }
+    return res;
+  }
+  const lastT = b => T[b.taf[b.taf.length - 1]];
+  function product(lists) {
+    let res = [[]];
+    for (const l of lists) { const nr = []; for (const pre of res) for (const x of l) nr.push(pre.concat([x])); res = nr; }
+    return res;
+  }
+  function detailedPatterns(b) {
+    const P = { sadr: [], ajuz: [], pairs: new Set() };
+    if (b.only_one_shatr) {
+      const hashw = hashwForms(b, 0);
+      const endings = b.map.set.map(z => makeForm(lastT(b), z));
+      for (const p of product(hashw.concat([endings]))) {
+        const feet = p.map(f => f.pattern), full = feet.join('');
+        P.sadr.push({ pattern: full, feet, forms: p, fb: b, type: 'single_shatr', bahr_type: b.bahr_type });
+        P.pairs.add(full + '|');
+      }
+    } else {
+      const sh = hashwForms(b, 0), ah = hashwForms(b, 1);
+      const seenS = new Set(), seenA = new Set();
+      for (const [az, dlist] of b.map.dict) {
+        const arudh = makeForm(lastT(b), az);
+        const sList = [];
+        for (const sp of product(sh.concat([[arudh]]))) {
+          const feet = sp.map(f => f.pattern), full = feet.join('');
+          sList.push(full);
+          if (!seenS.has(full)) { seenS.add(full); P.sadr.push({ pattern: full, feet, forms: sp, fb: b, arudh_foot: arudh.pattern, arudh_class: az, bahr_type: b.bahr_type }); }
+        }
+        const dharbs = dlist.map(d => makeForm(lastT(b), d));
+        const aList = [];
+        for (const ap of product(ah.concat([dharbs]))) {
+          const feet = ap.map(f => f.pattern), full = feet.join('');
+          aList.push(full);
+          if (!seenA.has(full)) { seenA.add(full); P.ajuz.push({ pattern: full, feet, forms: ap, fb: b, dharb_foot: feet[feet.length - 1], bahr_type: b.bahr_type }); }
+        }
+        for (const fs of sList) for (const fa of aList) P.pairs.add(fs + '|' + fa);
+      }
+    }
+    for (const sub of b.subs) {
+      const sp = detailedPatterns(B[sub]);
+      P.sadr.push(...sp.sadr); P.ajuz.push(...sp.ajuz); sp.pairs.forEach(x => P.pairs.add(x));
+    }
+    return P;
+  }
+
+  // ───────────────────────── meters/engine ─────────────────────────
+  function footVar(t, form) {
+    const k = form.applied || 'NoZehafNorEllah';
+    return { pattern: form.pattern, base_tafeela: t.name, actual_tafeela: form.name, zihaf: k,
+      zihaf_name_ar: Z[k].ar, zihaf_name_en: Z[k].en, cost: (k in ZIHAF_COST) ? ZIHAF_COST[k] : 1, salim: k === 'NoZehafNorEllah' };
+  }
+  function buildGrammar(b) {
+    const g = { b, name_ar: b.ar, name_en: b.en, meter_key: b.key, bahr_type: b.bahr_type, only_one_shatr: b.only_one_shatr,
+      sadr: [], ajuz: [], pairs: new Set(), arudhSet: new Set(), dharbSet: [] };
+    const n = b.taf.length;
+    const slotsFor = idx => {
+      const slots = [];
+      for (let i = 0; i < n - 1; i++) {
+        const t = T[b.taf[i]];
+        let forms = allForms(t);
+        const dis = b.disallowed[idx];
+        if (dis && i < dis.length) forms = forms.filter(f => !dis[i].includes(f.applied));
+        const seen = new Set(), sv = [];
+        for (const f of forms) { const fv = footVar(t, f); if (!seen.has(fv.pattern)) { seen.add(fv.pattern); sv.push(fv); } }
+        slots.push(sv);
+      }
+      return slots;
+    };
+    const lt = lastT(b);
+    const sadr = slotsFor(0);
+    const arV = [], seenA = new Set();
+    if (b.map.dict) {
+      for (const [az, dl] of b.map.dict) {
+        g.arudhSet.add(az);
+        const fv = footVar(lt, makeForm(lt, az));
+        if (!seenA.has(fv.pattern)) { seenA.add(fv.pattern); arV.push(fv); }
+        for (const d of dl) { if (!g.dharbSet.includes(d)) g.dharbSet.push(d); g.pairs.add(az + '|' + d); }
+      }
+    } else {
+      for (const z of b.map.set) {
+        g.arudhSet.add(z);
+        const fv = footVar(lt, makeForm(lt, z));
+        if (!seenA.has(fv.pattern)) { seenA.add(fv.pattern); arV.push(fv); }
+      }
+    }
+    if (g.dharbSet.includes('Qasar') && g.dharbSet.includes('Qataa')) { g.dharbSet = g.dharbSet.filter(d => d !== 'Qasar'); g.dharbSet.splice(g.dharbSet.indexOf('Qataa'), 0, 'Qasar'); }
+    sadr.push(arV); g.sadr = sadr;
+    if (!b.only_one_shatr) {
+      const aj = slotsFor(1);
+      const dV = [], seenD = new Set();
+      for (const d of g.dharbSet) { const fv = footVar(lt, makeForm(lt, d)); if (!seenD.has(fv.pattern)) { seenD.add(fv.pattern); dV.push(fv); } }
+      aj.push(dV); g.ajuz = aj;
+    }
+    return g;
+  }
+  const GRAMMAR_ORDER = ['Taweel', 'Madeed', 'Baseet', 'BaseetMukhalla', 'BaseetMajzoo', 'Wafer', 'WaferMajzoo', 'Kamel', 'KamelMajzoo',
+    'Hazaj', 'Rajaz', 'RajazMajzoo', 'RajazMashtoor', 'RajazManhook', 'Ramal', 'RamalMajzoo', 'Saree', 'SareeMashtoor', 'Munsareh',
+    'MunsarehManhook', 'Khafeef', 'KhafeefMajzoo', 'Mudhare', 'Muqtadheb', 'Mujtath', 'Mutakareb', 'MutakarebMajzoo', 'Mutadarak',
+    'MutadarakMajzoo', 'MutadarakMashtoor'];
+  let GRAMMARS = null, PRE = null;
+  function init() {
+    if (GRAMMARS) return;
+    GRAMMARS = GRAMMAR_ORDER.map(id => buildGrammar(B[id]));
+    PRE = {};
+    for (const k in ALL_METERS) {
+      const d = detailedPatterns(B[ALL_METERS[k]]);
+      const sMap = new Map(), aMap = new Map();
+      for (const s of d.sadr) if (!sMap.has(s.pattern)) sMap.set(s.pattern, s);
+      for (const a of d.ajuz) if (!aMap.has(a.pattern)) aMap.set(a.pattern, a);
+      PRE[k] = { d, sMap, aMap };
+    }
+  }
+
+  function parseShatrExact(pattern, slots, g) {
+    if (!pattern || !slots.length) return [];
+    const ns = slots.length, ders = [], cur = [];
+    (function dfs(si, ci) {
+      if (si === ns) {
+        if (ci === pattern.length) {
+          ders.push({ feet: cur.slice(), pattern, cost: cur.reduce((s, f) => s + f.cost, 0),
+            salim: cur.filter(f => f.salim).length, end: cur[cur.length - 1].zihaf, g });
+        }
+        return;
+      }
+      const rs = ns - si, rc = pattern.length - ci;
+      if (rc < rs * 3 || rc > rs * 8) return;
+      for (const fv of slots[si]) {
+        const pl = fv.pattern.length;
+        if (ci + pl <= pattern.length && pattern.substr(ci, pl) === fv.pattern) { cur.push(fv); dfs(si + 1, ci + pl); cur.pop(); }
+      }
+    })(0, 0);
+    ders.sort((a, b) => (a.cost - b.cost) || (b.salim - a.salim));
+    return ders;
+  }
+
+  function matchVerse(sadrC, ajuzC, target) {
+    const hasAjuz = ajuzC.some(c => c[1]);
+    const res = [];
+    const gs = target ? GRAMMARS.filter(g => g.meter_key === target) : GRAMMARS;
+    for (const g of gs) {
+      let bs = null;
+      for (const [, p] of sadrC) { const d = parseShatrExact(p, g.sadr, g); if (d.length) { bs = d[0]; break; } }
+      if (!bs) continue;
+      if (g.only_one_shatr || !hasAjuz) {
+        if (g.only_one_shatr && hasAjuz) continue;
+        const valid = g.arudhSet.has(bs.end) || g.arudhSet.size === 0;
+        res.push([g, bs, null, 1.0 - bs.cost * 0.001 + bs.salim * 0.0005, valid]);
+      } else {
+        let ba = null;
+        for (const [, p] of ajuzC) { const d = parseShatrExact(p, g.ajuz, g); if (d.length) { ba = d[0]; break; } }
+        if (!ba) continue;
+        let vp = g.pairs.has(bs.end + '|' + ba.end); if (!g.pairs.size) vp = true;
+        res.push([g, bs, ba, 1.0 - (bs.cost + ba.cost) * 0.001 + (bs.salim + ba.salim) * 0.0005, vp]);
+      }
+    }
+    return res;
+  }
+
+  function maxBy(arr, keyFn) { // Python max(): first of the maxima
+    let best = null, bk = null;
+    for (const x of arr) { const k = keyFn(x); if (best === null || cmpKey(k, bk) > 0) { best = x; bk = k; } }
+    return best;
+  }
+  function cmpKey(a, b) {
+    for (let i = 0; i < a.length; i++) { const x = typeof a[i] === 'boolean' ? +a[i] : a[i], y = typeof b[i] === 'boolean' ? +b[i] : b[i]; if (x !== y) return x > y ? 1 : -1; }
+    return 0;
+  }
+
+  function disambiguate(cands, sp, ap) {
+    if (!cands.length) return null;
+    if (cands.length === 1) return cands[0];
+    let pool = cands.filter(c => c[4]); if (!pool.length) pool = cands;
+    const full = sp + ap;
+    if (!ap) {
+      const single = pool.filter(c => c[0].only_one_shatr);
+      if (single.length) {
+        pool = single;
+        const rm = pool.filter(c => c[0].meter_key === 'rajaz' && c[0].bahr_type === 'mashtoor');
+        if (rm.length && sp.length >= 18) return rm[0];
+        const mh = pool.filter(c => c[0].bahr_type === 'manhook');
+        if (mh.length && sp.length <= 15) return maxBy(mh, c => [prio(c[0].meter_key)]);
+      }
+    }
+    const byScore = arr => maxBy(arr, c => [round3(c[3]), prio(c[0].meter_key)]);
+    if (full.includes('1110110')) { const k = pool.filter(c => c[0].meter_key === 'kamel'); if (k.length) return byScore(k); }
+    if (full.includes('1101110')) { const w = pool.filter(c => c[0].meter_key === 'wafer'); if (w.length) return byScore(w); }
+    if (!full.includes('1101110')) { const h = pool.filter(c => c[0].meter_key === 'hazaj'); if (h.length) return byScore(h); }
+    const mk = pool.filter(c => c[0].bahr_type === 'mukhalla');
+    if (mk.length && (sp.endsWith('11010') || sp === '10101101011011010')) return mk[0];
+    const rj = pool.filter(c => c[0].meter_key === 'rajaz'), km = pool.filter(c => c[0].meter_key === 'kamel');
+    if (rj.length && km.length && !full.includes('1110110')) return byScore(rj);
+    const sr = pool.filter(c => c[0].meter_key === 'saree');
+    if (sr.length && sp.startsWith('10101101010110') && sp.endsWith('10110')) return sr[0];
+    const rank = c => [c[4] ? 1 : 0, round3(c[3]), c[0].bahr_type === 'tam' ? 2 : (c[0].bahr_type === 'mukhalla' ? 1 : 0), prio(c[0].meter_key)];
+    pool = pool.slice().sort((a, b) => cmpKey(rank(b), rank(a)));
+    return pool[0];
+  }
+
+  // ───────────────────────── difflib.SequenceMatcher.ratio ─────────────────────────
+  function seqRatio(a, b) {
+    const la = a.length, lb = b.length;
+    const b2j = {};
+    for (let j = 0; j < lb; j++) (b2j[b[j]] = b2j[b[j]] || []).push(j);
+    function longest(alo, ahi, blo, bhi) {
+      let bi = alo, bj = blo, bs = 0, j2len = {};
+      for (let i = alo; i < ahi; i++) {
+        const nj = {}; const js = b2j[a[i]] || [];
+        for (const j of js) {
+          if (j < blo) continue; if (j >= bhi) break;
+          const k = nj[j] = (j2len[j - 1] || 0) + 1;
+          if (k > bs) { bi = i - k + 1; bj = j - k + 1; bs = k; }
+        }
+        j2len = nj;
+      }
+      while (bi > alo && bj > blo && a[bi - 1] === b[bj - 1]) { bi--; bj--; bs++; }
+      while (bi + bs < ahi && bj + bs < bhi && a[bi + bs] === b[bj + bs]) bs++;
+      return [bi, bj, bs];
+    }
+    let matches = 0; const q = [[0, la, 0, lb]];
+    while (q.length) {
+      const [alo, ahi, blo, bhi] = q.pop();
+      const [i, j, k] = longest(alo, ahi, blo, bhi);
+      if (k) {
+        matches += k;
+        if (alo < i && blo < j) q.push([alo, i, blo, j]);
+        if (i + k < ahi && j + k < bhi) q.push([i + k, ahi, j + k, bhi]);
+      }
+    }
+    return la + lb ? 2 * matches / (la + lb) : 1;
+  }
+  const SIM_CACHE = new Map();
+  function similarity(a, b) {
+    if (!a && !b) return 1; if (!a || !b) return 0; if (a === b) return 1;
+    const key = a + '|' + b; if (SIM_CACHE.has(key)) return SIM_CACHE.get(key);
+    const v = Math.pow(seqRatio(a, b), 6); if (SIM_CACHE.size > 60000) SIM_CACHE.clear(); SIM_CACHE.set(key, v); return v;
+  }
+
+  // ───────────────────────── processor ─────────────────────────
+  const VARIATION = {
+    '11010|11010': ['فعولن', 'فعولن', 'سالمة (صحيحة)', 'Salim'], '11010|1101': ['فعولن', 'فعولُ', 'مقبوضة (القبض)', 'Qabadh'],
+    '11010|1010': ['فعولن', 'فعلن', 'أثلم (الثلم)', 'Thalm'], '11010|101': ['فعولن', 'فعلُ', 'أثرم (الثرم)', 'Tharm'],
+    '11010|110': ['فعولن', 'فعو / فل', 'محذوفة (الحذف)', 'Hadhf'], '11010|11': ['فعولن', 'فعْ', 'أبتر (البتر)', 'Batr'],
+    '11010|10': ['فعولن', 'فعْ', 'أبتر (البتر)', 'Batr'],
+    '10110|10110': ['فاعلن', 'فاعلن', 'سالمة (صحيحة)', 'Salim'], '10110|1110': ['فاعلن', 'فعلن', 'مخبونة (الخبن)', 'Khaban'],
+    '10110|1010': ['فاعلن', 'فالن / فعلن', 'مشعثة (التشعيث)', 'Tasheeth'], '10110|101100': ['فاعلن', 'فاعلان', 'مذيلة (التذييل)', 'Tatheel'],
+    '10110|11100': ['فاعلن', 'فعلان', 'مرفلة مخبونة', 'Tarfeel and Khaban'], '10110|10': ['فاعلن', 'فاعْ / فلن', 'أبتر (البتر)', 'Batr'],
+    '1101010|1101010': ['مفاعيلن', 'مفاعيلن', 'سالمة (صحيحة)', 'Salim'], '1101010|110110': ['مفاعيلن', 'مفاعلن', 'مقبوضة (القبض)', 'Qabadh'],
+    '1101010|110101': ['مفاعيلن', 'مفاعيلُ', 'مكفوفة (الكف)', 'Kaff'], '1101010|11010': ['مفاعيلن', 'فعولن', 'محذوفة (الحذف)', 'Hadhf'],
+    '1010110|1010110': ['مستفعلن', 'مستفعلن', 'سالمة (صحيحة)', 'Salim'], '1010110|1110110': ['مستفعلن', 'مفاعلن', 'مخبونة (الخبن)', 'Khaban'],
+    '1010110|101110': ['مستفعلن', 'مفتعلن', 'مطوية (الطي)', 'Tay'], '1010110|111110': ['مستفعلن', 'فعلتن', 'مخبولة (الخبل)', 'Khabal'],
+    '1010110|101010': ['مستفعلن', 'مفعولن', 'مقطوعة (القطع)', 'Qataa'], '1010110|111010': ['مستفعلن', 'فعولن', 'مقطوعة مخبونة', 'Khaban and Qataa'],
+    '1010110|10101100': ['مستفعلن', 'مستفعلان', 'مذيلة (التذييل)', 'Tatheel'],
+    '1110110|1110110': ['متفاعلن', 'متفاعلن', 'سالمة (صحيحة)', 'Salim'], '1110110|1010110': ['متفاعلن', 'مُتْفاعلن', 'مضمرة (الإضمار)', 'Edmaar'],
+    '1110110|110110': ['متفاعلن', 'مفاعلن', 'موقوصة (الوقص)', 'Waqas'], '1110110|101110': ['متفاعلن', 'مُتَفْعلن', 'مخزولة (الخزل)', 'Khazal'],
+    '1110110|111010': ['متفاعلن', 'متفاعلْ', 'مقطوعة (القطع)', 'Qataa'], '1110110|101010': ['متفاعلن', 'مُتْفاعلْ', 'مقطوعة مضمرة', 'Qataa and Edmaar'],
+    '1110110|1110': ['متفاعلن', 'فعلن', 'حذاء (الحذذ)', 'Hathath'], '1110110|1010': ['متفاعلن', 'فعلْ', 'حذاء مضمرة', 'Hathath and Edmaar'],
+    '1110110|11101100': ['متفاعلن', 'متفاعلان', 'مذيلة (التذييل)', 'Tatheel'], '1110110|10101100': ['متفاعلن', 'مُتْفاعلان', 'مذيلة مضمرة', 'Tatheel and Edmaar'],
+    '1110110|111011010': ['متفاعلن', 'متفاعلاتن', 'مرفلة (الترفيل)', 'Tarfeel'], '1110110|101011010': ['متفاعلن', 'مُتْفاعلاتن', 'مرفلة مضمرة', 'Tarfeel and Edmaar'],
+    '1101110|1101110': ['مفاعلتن', 'مفاعلتن', 'سالمة (صحيحة)', 'Salim'], '1101110|1101010': ['مفاعلتن', 'مفاعيلن', 'معصوبة (العصب)', 'Asab'],
+    '1101110|110110': ['مفاعلتن', 'مفاعتن', 'معقولة (العقل)', 'Aql'], '1101110|110101': ['مفاعلتن', 'مفاعيلُ', 'منقوصة (النقص)', 'Nakas'],
+    '1101110|11010': ['مفاعلتن', 'فعولن', 'مقطوفة (القطف)', 'Qataf'],
+    '1010101|1010101': ['مفعولات', 'مفعولاتُ', 'سالمة', 'Salim'], '1010101|1110101': ['مفعولات', 'مفاعيلُ', 'مخبونة (الخبن)', 'Khaban'],
+    '1010101|1011101': ['مفعولات', 'مفتعلاتُ', 'مطوية (الطي)', 'Tay'], '1010101|1010110': ['مفعولات', 'مفعولن', 'مكسوفة (الكسف)', 'Kasf'],
+    '1010101|10110': ['مفعولات', 'فاعلن', 'مطوية مكسوفة', 'Tay and Kasf'], '1010101|11110': ['مفعولات', 'فعلن', 'مخبولة مكسوفة', 'Khabal and Kasf'],
+    '1010101|101010': ['مفعولات', 'مفعولاتْ', 'موقوفة (الوقف)', 'Waqf'], '1010101|101100': ['مفعولات', 'فاعلان', 'موقوفة مطوية', 'Waqf and Tay'],
+    '1010101|1010': ['مفعولات', 'فعلن', 'أصلم (الصلم)', 'Salam'],
+    '1011010|1011010': ['فاعلاتن', 'فاعلاتن', 'سالمة (صحيحة)', 'Salim'], '1011010|1111010': ['فاعلاتن', 'فعلاتن', 'مخبونة (الخبن)', 'Khaban'],
+    '1011010|101101': ['فاعلاتن', 'فاعلاتُ', 'مكفوفة (الكف)', 'Kaff'], '1011010|111101': ['فاعلاتن', 'فعلاتُ', 'مشكولة (الشكل)', 'Shakal'],
+    '1011010|10110': ['فاعلاتن', 'فاعلن', 'محذوفة (الحذف)', 'Hadhf'], '1011010|11110': ['فاعلاتن', 'فعلن', 'محذوفة مخبونة', 'Hadhf and Khaban'],
+    '1011010|101100': ['فاعلاتن', 'فاعلاتان', 'مسبغة (التسبيغ)', 'Tasbeegh'], '1011010|1010': ['فاعلاتن', 'فاعْ / فلن', 'أبتر (البتر)', 'Batr']
+  };
+  const DEFAULT_TAF = {
+    '11010': ['فعولن', 'فعولن', 'سالمة (صحيحة)', 'Salim'], '10110': ['فاعلن', 'فاعلن', 'سالمة (صحيحة)', 'Salim'],
+    '1101010': ['مفاعيلن', 'مفاعيلن', 'سالمة (صحيحة)', 'Salim'], '1010110': ['مستفعلن', 'مستفعلن', 'سالمة (صحيحة)', 'Salim'],
+    '1110110': ['متفاعلن', 'متفاعلن', 'سالمة (صحيحة)', 'Salim'], '1101110': ['مفاعلتن', 'مفاعلتن', 'سالمة (صحيحة)', 'Salim'],
+    '1010101': ['مفعولات', 'مفعولاتُ', 'سالمة (صحيحة)', 'Salim'], '1011010': ['فاعلاتن', 'فاعلاتن', 'سالمة (صحيحة)', 'Salim'],
+    '1101': ['فعولن', 'فعولُ', 'مقبوضة (القبض)', 'Qabadh'], '1110': ['فاعلن', 'فعلن', 'مخبونة (الخبن)', 'Khaban'],
+    '110110': ['مفاعيلن', 'مفاعلن', 'مقبوضة (القبض)', 'Qabadh'], '101110': ['مستفعلن', 'مفتعلن', 'مطوية (الطي)', 'Tay'],
+    '101010': ['مستفعلن', 'مفعولن', 'مقطوعة (القطع)', 'Qataa'], '111010': ['متفاعلن', 'متفاعلْ', 'مقطوعة (القطع)', 'Qataa']
+  };
+
+  const TAF_PAT = {}; for (const k in T) if (!(T[k].name in TAF_PAT)) TAF_PAT[T[k].name] = T[k].pat;
+  function actualName(base, pat) { const v = VARIATION[(TAF_PAT[base] || '') + '|' + pat]; return v ? v[1] : base; }
+  function bestComponent(inp, comps) {
+    if (!inp) return { score: 0, ref: null };
+    for (const it of comps) if (it.pattern === inp) return { score: 1, ref: it };
+    let bs = -1, br = null;
+    for (const it of comps) {
+      if (Math.abs(it.pattern.length - inp.length) > 4) continue;
+      const s = similarity(it.pattern, inp);
+      if (s > bs) { bs = s; br = it; if (s === 1) break; }
+    }
+    if (br === null && comps.length) { br = comps[0]; bs = similarity(br.pattern, inp); }
+    return { score: bs, ref: br };
+  }
+
+  const formFoot = (f, i) => ({ foot_index: i, expected_pattern: f.pattern, actual_segment: f.pattern, base_tafeela: f.base_tafeela, actual_tafeela: f.actual_tafeela, actual_name: actualName(f.base_tafeela, f.pattern), zihaf_name_ar: f.zihaf_name_ar, zihaf_name_en: f.zihaf_name_en, zihaf_key: f.zihaf, cost: f.cost, score: 1, status: 'ok' });
+  const fvAt = (ref, i) => footVar(i < ref.fb.taf.length - 1 ? T[ref.fb.taf[i]] : lastT(ref.fb), ref.forms[i]);
+  function analyzeFeet(inp, refFeet, ref) {
+    const out = []; let cur = 0;
+    refFeet.forEach((exp, i) => {
+      const fm = ref && ref.forms && ref.fb && ref.forms[i] ? fvAt(ref, i) : null;
+      if (fm && fm.pattern === exp && inp.slice(cur, cur + exp.length) === exp) { const o = formFoot(fm, i); out.push(o); cur += exp.length; return; }
+      const end = Math.min(cur + exp.length, inp.length);
+      const seg = inp.slice(cur, end);
+      if (!seg) { out.push({ foot_index: i, expected_pattern: exp, actual_segment: 'MISSING', base_tafeela: '', actual_tafeela: '', zihaf_name_ar: 'مفقودة', zihaf_name_en: 'Missing', score: 0, status: 'missing' }); return; }
+      const sc = similarity(exp, seg);
+      const info = VARIATION[exp + '|' + seg] || DEFAULT_TAF[exp] || ['', '', 'سالمة', 'Salim'];
+      out.push({ foot_index: i, expected_pattern: exp, actual_segment: seg, base_tafeela: info[0], actual_tafeela: info[1], actual_name: info[1], zihaf_name_ar: info[2], zihaf_name_en: info[3], score: sc, status: sc === 1 ? 'ok' : 'broken' });
+      cur = end;
+    });
+    if (cur < inp.length) out.push({ foot_index: refFeet.length, expected_pattern: '', actual_segment: inp.slice(cur), base_tafeela: '', actual_tafeela: '', zihaf_name_ar: 'زيادة غير مطابقة', zihaf_name_en: 'Extra Bits', score: 0, status: 'extra_bits' });
+    return out;
+  }
+
+  function findBestMeter(sadrC, ajuzC, target) {
+    let keys = Object.keys(PRE);
+    if (target) { if (!PRE[target]) return []; keys = [target]; }
+    const hasAjuz = ajuzC.some(c => c[1]);
+    const cands = [];
+    for (const name of keys) {
+      const { d, sMap, aMap } = PRE[name];
+      let bS = null, bSs = -1, bSi = '';
+      for (const [, cp] of sadrC) {
+        const m = sMap.has(cp) ? { score: 1, ref: sMap.get(cp) } : bestComponent(cp, d.sadr);
+        if (m.score > bSs) { bSs = m.score; bS = m; bSi = cp; if (bSs === 1) break; }
+      }
+      let bA = null, bAs = -1, bAi = '';
+      if (hasAjuz) for (const [, cp] of ajuzC) {
+        if (!cp) continue;
+        const m = aMap.has(cp) ? { score: 1, ref: aMap.get(cp) } : bestComponent(cp, d.ajuz);
+        if (m.score > bAs) { bAs = m.score; bA = m; bAi = cp; if (bAs === 1) break; }
+      }
+      const aS = bA ? bAs : 0;
+      let vp = false;
+      if (bS && bS.ref && (!hasAjuz || (bA && bA.ref))) vp = d.pairs.has(bS.ref.pattern + '|' + (bA ? bA.ref.pattern : ''));
+      const B0 = B[ALL_METERS[name]];
+      cands.push({ meter_key: name, name_ar: B0.ar, name_en: B0.en, bahr_type: B0.bahr_type, score: hasAjuz ? (bSs + aS) / 2 : bSs, valid_pair: vp, sadr_in: bSi, ajuz_in: bAi });
+    }
+    cands.sort((a, b) => cmpKey([round3(b.score), b.valid_pair, prio(b.meter_key)], [round3(a.score), a.valid_pair, prio(a.meter_key)]));
+    return cands;
+  }
+
+  function analyzeVerse(sadrText, ajuzText, forced, idx) {
+    init();
+    ajuzText = ajuzText || '';
+    const sSat = prepareText(sadrText, true), sUns = prepareText(sadrText, false);
+    const aSat = ajuzText ? prepareText(ajuzText, true) : ['', ''];
+    const aUns = ajuzText ? prepareText(ajuzText, false, true) : ['', ''];
+    const sadrC = [sSat]; if (sUns[1] !== sSat[1]) sadrC.push(sUns);
+    const ajuzC = [aSat]; if (ajuzText && aUns[1] !== aSat[1]) ajuzC.push(aUns);
+
+    const det = disambiguate(matchVerse(sadrC, ajuzC, forced), sadrC[0][1], ajuzC.length ? ajuzC[0][1] : '');
+    if (det) {
+      const [g, sd, ad, sc] = det;
+      let cs = sadrC[0]; if (sd) for (const c of sadrC) if (c[1] === sd.pattern) { cs = c; break; }
+      let ca = ajuzC.length ? ajuzC[0] : ['', '']; if (ad && ajuzText) for (const c of ajuzC) if (c[1] === ad.pattern) { ca = c; break; }
+      const mk = fv => fv.map((f, i) => ({ foot_index: i, expected_pattern: f.pattern, actual_segment: f.pattern, base_tafeela: f.base_tafeela, actual_tafeela: f.actual_tafeela, actual_name: actualName(f.base_tafeela, f.pattern), zihaf_name_ar: f.zihaf_name_ar, zihaf_name_en: f.zihaf_name_en, zihaf_key: f.zihaf, cost: f.cost, score: 1, status: 'ok' }));
+      return {
+        verse_index: idx || 0, sadr_text: sadrText, ajuz_text: ajuzText, meter_key: g.meter_key, meter_name_ar: g.name_ar,
+        meter_name_en: g.name_en, bahr_type: g.bahr_type, exact: true,
+        standard_pattern: ((sd ? sd.feet.map(f => f.pattern).join(' ') : '') + (ad ? ' ' + ad.feet.map(f => f.pattern).join(' ') : '')).trim(),
+        score: round3(sc), is_valid: true, errors: [],
+        sadr: { text: sadrText, arudi_text: cs[0], pattern: cs[1], feet: sd ? mk(sd.feet) : [], score: 1, is_valid: true },
+        ajuz: ajuzText ? { text: ajuzText, arudi_text: ca[0], pattern: ca[1], feet: (ad && ajuzText) ? mk(ad.feet) : [], score: 1, is_valid: true } : null
+      };
+    }
+    const cands = findBestMeter(sadrC, ajuzC, forced);
+    if (!cands.length) {
+      return { verse_index: idx || 0, sadr_text: sadrText, ajuz_text: ajuzText, meter_key: 'unknown', meter_name_ar: 'بحر غير محدد',
+        meter_name_en: 'Unknown Meter', bahr_type: 'unknown', exact: false, standard_pattern: '', score: 0, is_valid: false,
+        errors: ['Could not determine poetic meter.'],
+        sadr: { text: sadrText, arudi_text: sSat[0], pattern: sSat[1], feet: [], score: 0, is_valid: false },
+        ajuz: ajuzText ? { text: ajuzText, arudi_text: aSat[0], pattern: aSat[1], feet: [], score: 0, is_valid: false } : null };
+    }
+    const best = cands[0], B0 = B[ALL_METERS[best.meter_key]];
+    let cs = sadrC[0]; for (const c of sadrC) if (c[1] === best.sadr_in) { cs = c; break; }
+    let ca = ajuzC[0]; if (ajuzText) for (const c of ajuzC) if (c[1] === best.ajuz_in) { ca = c; break; }
+    const pats = PRE[best.meter_key].d;
+    let sComp = bestComponent(cs[1], pats.sadr);
+    const aComp = ajuzText ? bestComponent(ca[1], pats.ajuz) : null;
+    // Tasri': 'arudh mengikut bentuk dharb (biasanya bait pertama yang musarra')
+    let tasri = false;
+    if (ajuzText && aComp && aComp.score === 1 && aComp.ref && aComp.ref.forms && sComp.score < 1) {
+      const dForm = aComp.ref.forms[aComp.ref.forms.length - 1];
+      outer: for (const c of sadrC) for (const S of pats.sadr) {
+        if (!S.forms || S.bahr_type !== aComp.ref.bahr_type || S.forms.length !== aComp.ref.forms.length) continue;
+        const forms = S.forms.slice(0, -1).concat([dForm]);
+        const full = forms.map(f => f.pattern).join('');
+        if (full === c[1]) { cs = c; sComp = { score: 1, ref: { pattern: full, feet: forms.map(f => f.pattern), forms, fb: S.fb, bahr_type: S.bahr_type } }; tasri = true; break outer; }
+      }
+    }
+    const sFeet = analyzeFeet(cs[1], sComp.ref ? sComp.ref.feet : [], sComp.ref);
+    if (tasri && sFeet.length) sFeet[sFeet.length - 1].tasri = true;
+    const aFeet = ajuzText ? analyzeFeet(ca[1], aComp && aComp.ref ? aComp.ref.feet : [], aComp && aComp.ref) : null;
+    const sS = sComp.score, aS = aComp ? aComp.score : 1;
+    const comb = (sS + aS) / (ajuzText ? 2 : 1);
+    const sOk = sFeet.every(f => f.status === 'ok'), aOk = aFeet ? aFeet.every(f => f.status === 'ok') : true;
+    const errors = [];
+    if (comb < 0.85) errors.push('Low metric similarity score: ' + comb.toFixed(2));
+    sFeet.forEach(f => { if (f.status !== 'ok') errors.push('Sadr Foot ' + (f.foot_index + 1) + ' is ' + f.status + ': expected ' + f.expected_pattern + ', got ' + f.actual_segment); });
+    (aFeet || []).forEach(f => { if (f.status !== 'ok') errors.push('Ajuz Foot ' + (f.foot_index + 1) + ' is ' + f.status + ': expected ' + f.expected_pattern + ', got ' + f.actual_segment); });
+    return {
+      verse_index: idx || 0, sadr_text: sadrText, ajuz_text: ajuzText, meter_key: best.meter_key, meter_name_ar: B0.ar, meter_name_en: B0.en,
+      bahr_type: (sComp.ref && sComp.ref.bahr_type) || B0.bahr_type, exact: false, tasri,
+      standard_pattern: (sComp.ref ? sComp.ref.pattern : '') + (aComp && aComp.ref ? ' ' + aComp.ref.pattern : ''),
+      score: comb, is_valid: comb >= 0.85 && sOk && aOk, errors,
+      ref_sadr: sComp.ref, ref_ajuz: aComp ? aComp.ref : null,
+      sadr: { text: sadrText, arudi_text: cs[0], pattern: cs[1], feet: sFeet, score: sS, is_valid: sOk },
+      ajuz: ajuzText ? { text: ajuzText, arudi_text: ca[0], pattern: ca[1], feet: aFeet || [], score: aS, is_valid: aOk } : null
+    };
+  }
+
+  function processPoem(verses, meterName) {
+    init();
+    const first = [], counts = new Map();
+    verses.forEach(([s, a], i) => {
+      const v = analyzeVerse(s, a, meterName, i); first.push(v);
+      if (v.meter_key !== 'unknown') counts.set(v.meter_key, (counts.get(v.meter_key) || 0) + 1);
+    });
+    let globalM = 'unknown';
+    if (meterName) globalM = meterName;
+    else if (counts.size) { let bc = -1; for (const [k, c] of counts) if (c > bc) { bc = c; globalM = k; } }
+    const fin = verses.map(([s, a], i) => (meterName || globalM === 'unknown' || first[i].meter_key === globalM) ? first[i] : analyzeVerse(s, a, globalM, i));
+    if (globalM === 'unknown') return { error: 'Could not detect any valid meter.', verses: fin };
+    const B0 = B[ALL_METERS[globalM]];
+    return { meter: globalM, meter_name_ar: B0.ar, meter_name_en: B0.en, verses: fin };
+  }
+
+  const API = { prepareText, analyzeVerse, processPoem, METER_KEYS: Object.keys(ALL_METERS), meterInfo: k => B[ALL_METERS[k]], similarity, _seqRatio: seqRatio };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.ArudJS = API;
+})(typeof window !== 'undefined' ? window : this);
+
+</script>

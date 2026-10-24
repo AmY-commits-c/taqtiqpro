@@ -1,0 +1,361 @@
+<script>
+/* Set latihan (guru): bina / sunting / salin set, dan analisis kemahiran pelajar. */
+(function () {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const A = () => window.ArudApp;
+  const esc = s => A().esc(s);
+  const THIS_YEAR = new Date().getFullYear();
+
+  // 'Illah (termasuk 'illah yang berlaku seperti zihaf); selebihnya zihaf
+  const ILLAH = new Set(['Hadhf', 'HadhfAndKhaban', 'Qataf', 'Qataa', 'KhabanAndQataa', 'QataaAndEdmaar', 'Hathath', 'HathathAndEdmaar', 'Salam', 'Waqf',
+    'WaqfAndTay', 'KhabalAndKasf', 'TayAndKasf', 'Kasf', 'Qasar', 'ThalmAndQasar', 'Aql', 'Batr', 'Tarfeel', 'Tatheel', 'Tasbeegh', 'TatheelAndEdmaar',
+    'TarfeelAndEdmaar', 'TarfeelAndKhaban', 'Tasheeth', 'Thalm', 'Tharm']);
+  const zType = k => k === 'NoZehafNorEllah' ? 'salimah' : ILLAH.has(k) ? '\'illah' : 'zihaf';
+
+  let ED = null;            // set yang sedang disunting { ID?, Nama_Set, ..., items:[] }
+  const ANA = new Map();    // cache analisis bait
+  function ana(bait) {
+    const k = bait[0] + '#' + (bait[1] || '');
+    if (!ANA.has(k)) ANA.set(k, window.Latihan.analyseVerse(bait));
+    return ANA.get(k);
+  }
+  const verseText = b => b[1] ? b[0] + ' # ' + b[1] : b[0];
+
+  /* ───────────── Senarai set ───────────── */
+  function counts(id) {
+    const rows = (A().D.jawapan || []).filter(j => j.Set_ID === id);
+    return { jawapan: rows.length, pelajar: new Set(rows.map(j => (String(j.Nama_Pelajar) + '|' + j.Kelas).toLowerCase())).size };
+  }
+  function renderList() {
+    const sets = A().sortSets(A().D.setsAll);
+    $('#cSet').textContent = sets.length;
+    $('#setList').innerHTML = sets.length ? sets.map((x, idx) => {
+      const c = counts(x.ID), active = x.Status === 'Aktif';
+      return '<div class="set-card' + (active ? '' : ' arkib') + '"><div class="sc-order" role="group" aria-label="Susun ' + esc(x.Nama_Set) + '">' +
+        '<button type="button" class="btn small ghost" data-mv="-1" data-id="' + esc(x.ID) + '"' + (idx === 0 ? ' disabled' : '') + ' aria-label="Naikkan">▲</button>' +
+        '<span class="sc-no">' + (idx + 1) + '</span>' +
+        '<button type="button" class="btn small ghost" data-mv="1" data-id="' + esc(x.ID) + '"' + (idx === sets.length - 1 ? ' disabled' : '') + ' aria-label="Turunkan">▼</button></div><div class="sc-main"><div class="sc-title">' + esc(x.Nama_Set) + '</div>' +
+        '<div class="meta-note">' + esc(x.ID) + ' · ' + esc(x.Tahun) + (x.Kelas_Sasaran ? ' · ' + esc(x.Kelas_Sasaran) : '') + ' · ' + (x.items || []).length + ' item · bantuan ' + (x.Bantuan === 'Tidak' ? 'tutup' : 'buka') + '</div>' +
+        '<div class="sc-stats"><span class="pill ' + (active ? 'sah' : 'semak') + '">' + (active ? 'Aktif — dipaparkan kepada pelajar' : 'Arkib') + '</span>' +
+        '<span class="meta-note">' + c.pelajar + ' pelajar · ' + c.jawapan + ' jawapan</span></div></div>' +
+        '<div class="sc-act"><button class="btn small ghost" data-act="ana" data-id="' + esc(x.ID) + '">Analisis</button>' +
+        '<button class="btn small ghost" data-act="edit" data-id="' + esc(x.ID) + '">Sunting</button>' +
+        '<button class="btn small ghost" data-act="copy" data-id="' + esc(x.ID) + '">Guna semula</button>' +
+        '<button class="btn small ghost" data-act="toggle" data-id="' + esc(x.ID) + '">' + (active ? 'Arkibkan' : 'Aktifkan') + '</button>' +
+        '<button class="btn small danger" data-act="del" data-id="' + esc(x.ID) + '">Padam</button></div></div>';
+    }).join('') : '<p class="empty">Belum ada set latihan. Tekan "Set baharu" untuk mula.</p>';
+    $$('#setList [data-act]').forEach(b => b.addEventListener('click', () => onAct(b)));
+    $$('#setList [data-mv]').forEach(b => b.addEventListener('click', () => moveSet(b.dataset.id, Number(b.dataset.mv))));
+  }
+  async function onAct(btn) {
+    const D = A().D, x = (D.setsAll || []).find(s => s.ID === btn.dataset.id); if (!x) return;
+    const act = btn.dataset.act;
+    if (act === 'edit') return openEditor(JSON.parse(JSON.stringify(x)));
+    if (act === 'copy') { const c = JSON.parse(JSON.stringify(x)); delete c.ID; c.Nama_Set = x.Nama_Set + ' (salinan)'; c.Tahun = THIS_YEAR; c.Status = 'Aktif'; return openEditor(c); }
+    if (act === 'ana') { $('#anSet').value = x.ID; renderAnalysis(); $('#anPanel').scrollIntoView({ behavior: 'smooth' }); return; }
+    if (act === 'toggle') {
+      const v = x.Status === 'Aktif' ? 'Arkib' : 'Aktif'; btn.disabled = true;
+      try { await A().call('updateField', 'Set_Latihan', x.ID, 'Status', v); x.Status = v; syncActive(); A().toast(x.ID + ': ' + v); }
+      catch (e) { A().toast(e.message, true); } renderList(); return;
+    }
+    if (act === 'del') {
+      if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = 'Sahkan padam'; setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Padam'; }, 4000); return; }
+      btn.disabled = true;
+      try { await A().call('deleteById', 'Set_Latihan', x.ID); D.setsAll = D.setsAll.filter(s => s.ID !== x.ID); syncActive(); renderList(); A().toast('Set dipadam. Jawapan pelajar lama kekal dalam Jawapan_Latihan.'); }
+      catch (e) { A().toast(e.message, true); btn.disabled = false; }
+    }
+  }
+  // Susun set: dropdown pelajar ikut susunan ini (nombor kecil di atas)
+  let orderBusy = false;
+  async function moveSet(id, d) {
+    if (orderBusy) return;
+    const D = A().D, list = A().sortSets(D.setsAll), i = list.findIndex(s => s.ID === id), j = i + d;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    const prev = list.map(s => s.Susunan);
+    list.forEach((s, k) => { s.Susunan = k + 1; });
+    syncActive(); renderList();
+    orderBusy = true;
+    try { await A().call('saveSetOrder', list.map(s => s.ID)); }
+    catch (e) { list.forEach((s, k) => { s.Susunan = prev[k]; }); syncActive(); renderList(); A().toast('Susunan tidak disimpan: ' + e.message, true); }
+    finally { orderBusy = false; }
+  }
+  function syncActive() {
+    const D = A().D; D.sets = (D.setsAll || []).filter(s => s.Status === 'Aktif');
+    if (window.Latihan) window.Latihan.refresh();
+    fillAnSets();
+  }
+
+  /* ───────────── Editor set ───────────── */
+  function openEditor(set) {
+    ED = Object.assign({ Nama_Set: '', Tahun: THIS_YEAR, Kelas_Sasaran: '', Status: 'Aktif', Bantuan: 'Ya', Catatan: '', items: [] }, set || {});
+    const f = $('#setForm');
+    f.Nama_Set.value = ED.Nama_Set; f.Tahun.value = ED.Tahun; f.Kelas_Sasaran.value = ED.Kelas_Sasaran;
+    f.Bantuan.value = ED.Bantuan === 'Tidak' ? 'Tidak' : 'Ya'; f.Status.value = ED.Status === 'Arkib' ? 'Arkib' : 'Aktif'; f.Catatan.value = ED.Catatan || '';
+    $('#edTitle').textContent = ED.ID ? 'Sunting ' + ED.ID : (set && set.items && set.items.length ? 'Set baharu (salinan)' : 'Set baharu');
+    $('#setEditor').classList.remove('hidden');
+    renderItems(); renderCandidates();
+    $('#setEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function closeEditor() { ED = null; $('#setEditor').classList.add('hidden'); }
+
+  function feetSummary(a) {
+    if (!a || !a.v) return '';
+    const names = {}; a.sF.concat(a.aF).forEach(f => { if (f.status !== 'ok') return; const t = zType(f.zihaf_key || 'NoZehafNorEllah'); if (t === 'salimah') return; const n = A().cleanZ(f.zihaf_name_ar); names[n] = t; });
+    const k = Object.keys(names);
+    return k.length ? k.map(n => '<span class="chip">' + esc(n) + '</span><span class="tag ' + (names[n] === 'zihaf' ? 'zh' : 'il') + '">' + names[n] + '</span>').join(' ') : '<span class="tag sl">semua salimah</span>';
+  }
+  function renderItems() {
+    const it = ED.items;
+    $('#edCount').textContent = it.length + ' item';
+    $('#edItems').innerHTML = it.length ? it.map((x, i) => {
+      const a = ana(x.bait);
+      return '<li class="ed-item"><span class="num">' + (i + 1) + '</span><div class="ed-body">' + A().renderPoem(verseText(x.bait), true) +
+        '<div class="meta-note ed-meta">' + (a.d ? '<span class="chip"><b>' + esc(a.d.ar + ' ' + a.d.laqob) + '</b></span> ' + feetSummary(a) : 'Sistem tidak dapat mentaqti\'') +
+        (a.sure ? '' : ' · <b>⚠ sebahagian taf\'ilah tidak pasti — tidak dinilai</b>') + (x.src ? ' · ' + esc(x.src) : '') + '</div></div>' +
+        '<div class="ed-ctl"><button type="button" class="btn small ghost" data-mv="-1" data-i="' + i + '" aria-label="Naik">↑</button><button type="button" class="btn small ghost" data-mv="1" data-i="' + i + '" aria-label="Turun">↓</button>' +
+        '<button type="button" class="btn small danger" data-rm="' + i + '" aria-label="Buang">✕</button></div></li>';
+    }).join('') : '<p class="empty" style="padding:14px 0">Belum ada item. Tambah dari senarai di sebelah, jana rawak, atau tulis sendiri.</p>';
+    $$('#edItems [data-mv]').forEach(b => b.addEventListener('click', () => {
+      const i = +b.dataset.i, j = i + Number(b.dataset.mv); if (j < 0 || j >= ED.items.length) return;
+      [ED.items[i], ED.items[j]] = [ED.items[j], ED.items[i]]; renderItems();
+    }));
+    $$('#edItems [data-rm]').forEach(b => b.addEventListener('click', () => { ED.items.splice(+b.dataset.rm, 1); renderItems(); renderCandidates(); }));
+  }
+
+  const T = v => String(v || '').trim();
+  function candidates() {
+    const D = A().D, src = $('#edSrc').value, b = $('#edBahar').value, l = $('#edLaqob').value;
+    const bank = (D.bank || []).filter(r => r.Status !== 'Ditolak');
+    const rows = src === 'rujukan' ? (D.rujukan || []) : src === 'bank' ? bank : (D.rujukan || []).concat(bank);
+    const out = []; let skipped = 0;
+    // Tapis kasar ikut lajur Bahar/Laqob, kemudian tapis tepat ikut bacaan sistem bagi SETIAP bait
+    // (pelajar dinilai berdasarkan bacaan sistem, jadi bait yang dibaca sebagai bahar lain mesti dikecualikan).
+    rows.filter(r => (!b || T(r.Bahar) === b) && (!l || T(r.Laqob) === l)).forEach(r => {
+      const vs = A().parseVerses(r.Teks);
+      vs.forEach((bait, i) => {
+        const c = { src: r.ID + (vs.length > 1 ? ' bait ' + (i + 1) : ''), bait, row: r };
+        if (b || l) {
+          const a = ana(bait);
+          if (!a.d || (b && a.d.ar !== b) || (l && a.d.laqob !== l)) { skipped++; return; }
+        }
+        out.push(c);
+      });
+    });
+    candidates.skipped = skipped;
+    return out;
+  }
+  const inSet = c => ED.items.some(x => verseText(x.bait) === verseText(c.bait));
+  function renderCandidates() {
+    if (!ED) return;
+    const full = candidates(); candidates.lastN = full.length;
+    const list = full.slice(0, 80);
+    $('#edCands').innerHTML = list.length ? list.map((c, i) => {
+      const a = ana(c.bait), added = inSet(c);
+      return '<label class="cand-row' + (added ? ' added' : '') + '"><input type="checkbox" data-ci="' + i + '"' + (added ? ' disabled checked' : '') + '>' +
+        '<span class="cr-text">' + esc(c.bait[0].split(/\s+/).slice(0, 6).join(' ')) + '…</span><span class="meta-note">' + esc(c.src) + ' · <span class="ar-inline">' +
+        esc(a.d ? a.d.ar + ' ' + a.d.laqob : '؟') + '</span>' + (a.sure ? '' : ' ⚠') + '</span></label>';
+    }).join('') : '<p class="empty" style="padding:14px 0">Tiada bait untuk tapisan ini.</p>';
+    const all = candidates.lastN, sk = candidates.skipped;
+    $('#edCandNote').innerHTML = all + ' bait sepadan' + (all > 80 ? ' (80 dipaparkan)' : '') +
+      (sk ? ' · <span title="Lajur Bahar/Laqob syair ini sepadan, tetapi sistem membaca bait tersebut sebagai bahar/laqob lain. Bait ini dikecualikan supaya penilaian pelajar tepat.">' + sk + ' bait dikecualikan kerana sistem membacanya sebagai bahar/laqob lain ⓘ</span>' : '');
+    $('#edCands').dataset.n = list.length;
+    renderCandidates.list = list;
+  }
+  function addChecked() {
+    const list = renderCandidates.list || [];
+    let n = 0;
+    $$('#edCands input[data-ci]:checked:not(:disabled)').forEach(cb => { const c = list[+cb.dataset.ci]; if (c && !inSet(c)) { ED.items.push({ bait: c.bait, src: c.src }); n++; } });
+    if (!n) { A().toast('Tanda sekurang-kurangnya satu bait.', true); return; }
+    renderItems(); renderCandidates(); A().toast(n + ' item ditambah.');
+  }
+  function generate() {
+    const n = Math.max(1, Math.min(20, Number($('#edN').value) || 5));
+    const pool = candidates().filter(c => !inSet(c) && ana(c.bait).sure);
+    if (!pool.length) { A().toast('Tiada bait yang boleh disemak penuh untuk tapisan ini.', true); return; }
+    // utamakan kepelbagaian bahar/laqob
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    const seen = new Set(), pick = [];
+    pool.forEach(c => { const a = ana(c.bait), k = a.d ? a.d.key + a.d.laqob : '?'; if (pick.length < n && !seen.has(k)) { seen.add(k); pick.push(c); } });
+    pool.forEach(c => { if (pick.length < n && !pick.includes(c)) pick.push(c); });
+    pick.forEach(c => ED.items.push({ bait: c.bait, src: c.src }));
+    renderItems(); renderCandidates(); A().toast(pick.length + ' item dijana' + (pick.length < n ? ' (hanya ' + pick.length + ' tersedia)' : '') + '.');
+  }
+  function addOwn() {
+    const vs = A().parseVerses($('#edOwn').value);
+    if (!vs.length) { A().toast('Tulis bait dahulu (sadr # ajuz).', true); return; }
+    vs.forEach(v => ED.items.push({ bait: v, src: 'Tulis guru' }));
+    $('#edOwn').value = ''; renderItems(); A().toast(vs.length + ' item ditambah.');
+  }
+  async function saveSet(e) {
+    e.preventDefault();
+    const f = $('#setForm');
+    const payload = { ID: ED.ID || '', Nama_Set: f.Nama_Set.value, Tahun: f.Tahun.value, Kelas_Sasaran: f.Kelas_Sasaran.value, Bantuan: f.Bantuan.value, Status: f.Status.value, Catatan: f.Catatan.value, items: ED.items };
+    if (!payload.items.length) { A().toast('Tambah sekurang-kurangnya satu item.', true); return; }
+    $('#edSave').disabled = true;
+    try {
+      const out = await A().call('saveSet', payload);
+      const D = A().D; D.setsAll = (D.setsAll || []).filter(s => s.ID !== out.ID).concat([out]);
+      syncActive(); renderList(); closeEditor(); A().toast('Set disimpan: ' + out.ID);
+    } catch (err) { A().toast(err.message, true); }
+    $('#edSave').disabled = false;
+  }
+
+  /* ───────────── Analisis ───────────── */
+  function fillAnSets() {
+    const sets = A().sortSets(A().D.setsAll), cur = $('#anSet').value;
+    $('#anSet').innerHTML = '<option value="">Semua set</option>' + sets.map(s => '<option value="' + esc(s.ID) + '">' + esc(s.ID + ' — ' + s.Nama_Set) + '</option>').join('');
+    if (cur && sets.some(s => s.ID === cur)) $('#anSet').value = cur;
+    const J = A().D.jawapan || [];
+    const years = Array.from(new Set(J.map(j => String(j.Tahun)))).sort().reverse();
+    const yc = $('#anTahun').value; $('#anTahun').innerHTML = '<option value="">Semua tahun</option>' + years.map(y => '<option>' + esc(y) + '</option>').join(''); $('#anTahun').value = years.includes(yc) ? yc : '';
+    const kel = Array.from(new Set(J.map(j => String(j.Kelas || '')).filter(Boolean))).sort();
+    const kc = $('#anKelas').value; $('#anKelas').innerHTML = '<option value="">Semua kelas</option>' + kel.map(k => '<option>' + esc(k) + '</option>').join(''); $('#anKelas').value = kel.includes(kc) ? kc : '';
+  }
+  function latestRows() {
+    const set = $('#anSet').value, y = $('#anTahun').value, k = $('#anKelas').value;
+    const m = new Map();
+    (A().D.jawapan || []).filter(j => (!set || j.Set_ID === set) && (!y || String(j.Tahun) === y) && (!k || String(j.Kelas) === k))
+      .sort((a, b) => String(a.Tarikh).localeCompare(String(b.Tarikh)))
+      .forEach(j => m.set([j.Set_ID, String(j.Nama_Pelajar).trim().toLowerCase(), String(j.Kelas).trim().toLowerCase(), j.Item_No].join('|'), j));
+    return Array.from(m.values()).map(j => { let d = []; try { d = JSON.parse(j.Butiran_JSON || '[]'); } catch (e) {} return Object.assign({}, j, { det: d }); });
+  }
+  const pct = (a, b) => b ? Math.round(100 * a / b) : null;
+  const level = v => v === null ? '' : v >= 75 ? 'kukuh' : v >= 50 ? 'sederhana' : 'lemah';
+  const LVL_TXT = { kukuh: 'Kukuh', sederhana: 'Sederhana', lemah: 'Lemah' };
+  const mean = xs => { xs = xs.filter(v => v !== null); return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null; };
+  let TAB = 'bahar', OPEN = '';
+
+  function groupStats(rows, keyFn) {
+    const g = new Map();
+    rows.forEach(r => {
+      const k = keyFn(r); if (!k) return;
+      const x = g.get(k) || { n: 0, b: 0, l: 0, tq: [0, 0], taf: [0, 0], hal: [0, 0] };
+      x.n++; x.b += Number(r.Bahar_OK) ? 1 : 0; x.l += Number(r.Laqob_OK) ? 1 : 0;
+      x.tq[0] += +r.Taqti_Betul || 0; x.tq[1] += +r.Taqti_Jumlah || 0; x.taf[0] += +r.Taf_Betul || 0; x.taf[1] += +r.Taf_Jumlah || 0; x.hal[0] += +r.Hal_Betul || 0; x.hal[1] += +r.Hal_Jumlah || 0;
+      g.set(k, x);
+    });
+    return Array.from(g.entries()).map(([k, x]) => {
+      const c = [['Kenal bahar', pct(x.b, x.n)], ['Kenal laqob', pct(x.l, x.n)], ['Taqti\' (/0)', pct(x.tq[0], x.tq[1])], ['Taf\'ilah', pct(x.taf[0], x.taf[1])], ['Hal zihaf/\'illah', pct(x.hal[0], x.hal[1])]];
+      return { k, n: x.n, v: mean(c.map(e => e[1])), comps: c };
+    });
+  }
+  function zihafStats(rows) {
+    const g = new Map();
+    rows.forEach(r => r.det.forEach(f => {
+      const t = zType(f.z); const k = t === 'salimah' ? 'سالمة' : (f.zn || f.z);
+      const x = g.get(k) || { t, n: 0, hal: 0, tq: 0, taf: 0 }; x.n++; x.hal += f.hal; x.tq += f.tq; x.taf += f.taf; g.set(k, x);
+    }));
+    return g;
+  }
+  function zihafList(rows) {
+    return Array.from(zihafStats(rows).entries()).map(([k, x]) => ({
+      k, t: x.t, n: x.n, v: pct(x.hal, x.n),
+      comps: [['Kenal hal', pct(x.hal, x.n)], ['Taqti\' (/0)', pct(x.tq, x.n)], ['Taf\'ilah', pct(x.taf, x.n)]]
+    }));
+  }
+  function studentList(rows) {
+    const g = new Map();
+    rows.forEach(r => { const k = String(r.Nama_Pelajar).trim() + '|' + String(r.Kelas || '').trim(); (g.get(k) || g.set(k, []).get(k)).push(r); });
+    return Array.from(g.entries()).map(([k, rs]) => {
+      const [nama, kelas] = k.split('|');
+      const z = Array.from(zihafStats(rs).entries()).filter(([, s]) => s.t !== 'salimah').map(([n, s]) => [n, s.hal / s.n]).sort((a, b) => a[1] - b[1]);
+      const missed = Array.from(new Set(rs.filter(r => !+r.Bahar_OK).map(r => r.Bahar_Sebenar).filter(Boolean)));
+      const T = (a, b) => [rs.reduce((s, r) => s + (+r[a] || 0), 0), rs.reduce((s, r) => s + (+r[b] || 0), 0)];
+      const tq = T('Taqti_Betul', 'Taqti_Jumlah'), tf = T('Taf_Betul', 'Taf_Jumlah'), hl = T('Hal_Betul', 'Hal_Jumlah');
+      return {
+        k, nama, kelas, n: rs.length, v: mean(rs.map(r => +r.Skor || 0)),
+        comps: [['Kenal bahar', pct(rs.filter(r => +r.Bahar_OK).length, rs.length)], ['Kenal laqob', pct(rs.filter(r => +r.Laqob_OK).length, rs.length)],
+          ['Taqti\' (/0)', pct(tq[0], tq[1])], ['Taf\'ilah', pct(tf[0], tf[1])], ['Hal zihaf/\'illah', pct(hl[0], hl[1])]],
+        items: rs.slice().sort((a, b) => (+a.Item_No) - (+b.Item_No)).map(r => ({ no: r.Item_No, set: r.Set_ID, skor: +r.Skor || 0, bahar: r.Bahar_Sebenar })),
+        weak: z.filter(e => e[1] < 0.5).slice(0, 3).map(e => e[0]).concat(missed.slice(0, 2).map(b => 'bahar ' + b))
+      };
+    });
+  }
+
+  const byWeak = (a, b) => (a.v === null ? 101 : a.v) - (b.v === null ? 101 : b.v) || b.n - a.n;
+  function miniBars(comps) {
+    return '<div class="mini">' + comps.map(([l, v]) => '<div>' + l + ' <b>' + (v === null ? '—' : v + '%') + '</b><div class="mb"><i style="width:' + (v || 0) + '%"></i></div></div>').join('') + '</div>';
+  }
+  function mrow(id, labelHtml, nTxt, v, detail) {
+    const lv = level(v), open = OPEN === id;
+    return '<div class="mrow' + (open ? ' open' : '') + '" data-id="' + esc(id) + '"><button type="button" aria-expanded="' + open + '">' +
+      '<span class="m-lbl">' + labelHtml + '<span class="n">' + nTxt + '</span></span>' +
+      '<span class="m-bar" role="img" aria-label="' + (v === null ? 'tiada data' : v + '%') + '"><i style="width:' + (v || 0) + '%"></i></span>' +
+      '<span class="m-val"><b>' + (v === null ? '—' : v + '%') + '</b>' + (lv ? '<span class="lvl ' + lv + '">' + LVL_TXT[lv] + '</span>' : '') +
+      '<svg class="i m-chev" aria-hidden="true"><use href="#i-chev"/></svg></span></button><div class="m-detail">' + detail + '</div></div>';
+  }
+  const AR = t => '<span class="ar-inline">' + esc(t) + '</span>';
+  function renderTab(rows) {
+    let html = '';
+    if (TAB === 'bahar' || TAB === 'laqob') {
+      const list = groupStats(rows, TAB === 'bahar' ? r => r.Bahar_Sebenar : r => r.Bahar_Sebenar && r.Laqob_Sebenar ? r.Bahar_Sebenar + ' ' + r.Laqob_Sebenar : '').sort(byWeak);
+      html = list.map(x => mrow(TAB + ':' + x.k, AR(x.k), x.n + ' jawapan', x.v, miniBars(x.comps))).join('');
+    } else if (TAB === 'zihaf') {
+      const list = zihafList(rows).sort(byWeak);
+      html = list.map(x => mrow('zihaf:' + x.k, AR(x.k) + '<span class="tag ' + (x.t === '\'illah' ? 'il' : x.t === 'zihaf' ? 'zh' : 'sl') + '">' + x.t + '</span>', x.n + ' taf\'ilah', x.v,
+        miniBars(x.comps) + '<div class="m-note">Peratus utama = pelajar berjaya menamakan حال taf\'ilah ini dengan betul.</div>')).join('');
+    } else {
+      const list = studentList(rows).sort(byWeak);
+      html = list.map(x => mrow('pelajar:' + x.k, '<b>' + esc(x.nama) + '</b>' + (x.kelas ? '<span class="n">' + esc(x.kelas) + '</span>' : ''), x.n + ' item', x.v,
+        miniBars(x.comps) +
+        '<div class="m-note">Skor setiap soalan: ' + x.items.map(it => '<span class="chip" style="font-family:inherit;font-size:13px" title="' + esc(it.set + ' · ' + (it.bahar || '')) + '">S' + esc(it.no) + ' · ' + it.skor + '%</span>').join(' ') + '</div>' +
+        '<div class="m-note">Perlu diperkukuh: ' + (x.weak.length ? x.weak.map(w => '<span class="chip">' + esc(w) + '</span>').join(' ') : '—') + '</div>')).join('');
+    }
+    $('#anBody').innerHTML = html || '<p class="empty">Tiada jawapan pelajar untuk tapisan ini.</p>';
+    $$('#anBody .mrow>button').forEach(b => b.addEventListener('click', () => {
+      const r = b.parentNode, id = r.dataset.id, was = r.classList.contains('open');
+      $$('#anBody .mrow.open').forEach(o => { o.classList.remove('open'); o.firstChild.setAttribute('aria-expanded', 'false'); });
+      if (!was) { r.classList.add('open'); b.setAttribute('aria-expanded', 'true'); OPEN = id; } else OPEN = '';
+    }));
+    $$('.an-tabs [data-tab]').forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab === TAB)));
+  }
+  function renderAnalysis() {
+    const rows = latestRows();
+    renderAnalysis.rows = rows;
+    const students = new Set(rows.map(r => String(r.Nama_Pelajar).trim().toLowerCase() + '|' + String(r.Kelas).trim().toLowerCase())).size;
+    const avg = rows.length ? mean(rows.map(r => +r.Skor || 0)) : null;
+    const allFeet = rows.reduce((s, r) => s + r.det.length, 0), halOk = rows.reduce((s, r) => s + r.det.reduce((t, f) => t + f.hal, 0), 0);
+    const hp = allFeet ? pct(halOk, allFeet) : null;
+    const tile = (v, l, lv) => '<div class="tile"><div class="tv">' + v + '</div><div class="tl">' + l + (lv ? ' · <span class="lvl ' + lv + '" style="font-size:11px;padding:0 6px">' + LVL_TXT[lv] + '</span>' : '') + '</div></div>';
+    $('#anTiles').innerHTML = tile(students, 'Pelajar') + tile(rows.length, 'Jawapan item') +
+      tile(avg === null ? '—' : avg + '%', 'Purata skor', level(avg)) + tile(hp === null ? '—' : hp + '%', 'Hal zihaf/\'illah betul', level(hp));
+    // Fokus: kemahiran paling lemah (bahar + zihaf/'illah), sekali imbas
+    const weak = groupStats(rows, r => r.Bahar_Sebenar).map(x => ({ tab: 'bahar', id: 'bahar:' + x.k, k: x.k, v: x.v }))
+      .concat(zihafList(rows).filter(x => x.t !== 'salimah').map(x => ({ tab: 'zihaf', id: 'zihaf:' + x.k, k: x.k, v: x.v })))
+      .filter(x => x.v !== null && x.v < 75).sort((a, b) => a.v - b.v).slice(0, 4);
+    $('#anFocus').innerHTML = !rows.length ? '' : '<div class="focus"><b>Perlu perhatian:</b> ' + (weak.length ? weak.map(w =>
+      '<button type="button" class="fchip" data-tab="' + w.tab + '" data-id="' + esc(w.id) + '">' + AR(w.k) + ' <span class="lvl ' + level(w.v) + '">' + w.v + '%</span></button>').join('')
+      : '<span class="meta-note">Tiada — semua bahar dan zihaf/\'illah pada tahap kukuh.</span>') + '</div>';
+    $$('#anFocus .fchip').forEach(b => b.addEventListener('click', () => {
+      TAB = b.dataset.tab; OPEN = b.dataset.id; renderTab(rows);
+      const el = $$('#anBody .mrow').find(r => r.dataset.id === OPEN); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+    renderTab(rows);
+  }
+
+  /* ───────────── Init ───────────── */
+  function init() {
+    const bah = A().BAHAR.map(b => b.ar);
+    A().fillSelect($('#edBahar'), bah, 'Semua bahar');
+    A().fillSelect($('#edLaqob'), A().LAQOB, 'Semua laqob');
+  }
+  function onShow() { renderList(); fillAnSets(); renderAnalysis(); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    $('#btnNewSet').addEventListener('click', () => openEditor(null));
+    $('#edCancel').addEventListener('click', closeEditor);
+    $('#setForm').addEventListener('submit', saveSet);
+    ['#edSrc', '#edBahar', '#edLaqob'].forEach(s => $(s).addEventListener('change', renderCandidates));
+    $('#edAdd').addEventListener('click', addChecked);
+    $('#edGen').addEventListener('click', generate);
+    $('#edOwnAdd').addEventListener('click', addOwn);
+    ['#anSet', '#anTahun', '#anKelas'].forEach(s => $(s).addEventListener('change', () => { OPEN = ''; renderAnalysis(); }));
+    $$('.an-tabs [data-tab]').forEach(t => t.addEventListener('click', () => { TAB = t.dataset.tab; OPEN = ''; renderTab(renderAnalysis.rows || latestRows()); }));
+  });
+  window.Sets = { init, onShow };
+})();
+
+</script>

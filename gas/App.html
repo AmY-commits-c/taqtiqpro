@@ -1,0 +1,493 @@
+<script>
+/* Semakan Syair 'Arudh — logik antara muka (berjalan dalam pelayar). */
+(function () {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const SHEET = { BANK: 'Bank_Contoh_Syair', REKOD: 'Rekod_Pelajar', RUJ: 'Rujukan_BukuTeks' };
+  const LAQOB = ['التام', 'المجزوء', 'المشطور', 'المنهوك', 'المخلع'];
+  const LAQOB_OF = { tam: 'التام', majzoo: 'المجزوء', mashtoor: 'المشطور', manhook: 'المنهوك', mukhalla: 'المخلع' };
+  const BAHAR = ArudJS.METER_KEYS.map(k => ({ key: k, ar: ArudJS.meterInfo(k).ar.replace(/^بحر\s+/, '') }));
+  const BAHAR_AR = Object.fromEntries(BAHAR.map(b => [b.key, b.ar]));
+  const THIS_YEAR = new Date().getFullYear();
+
+  const FORM_NAME = {
+    'مستفعلن|Khaban': 'مُتَفْعِلُن', 'مستفعلن|Tay': 'مُفْتَعِلُن', 'مستفعلن|Khabal': 'فَعِلَتُن', 'مستفعلن|Qataa': 'مَفْعُولُن', 'مستفعلن|KhabanAndQataa': 'فَعُولُن', 'مستفعلن|Tatheel': 'مُسْتَفْعِلَان',
+    'فاعلن|Khaban': 'فَعِلُن', 'فاعلن|Tasheeth': 'فَعْلُن', 'فاعلن|Tatheel': 'فَاعِلَان', 'فاعلن|TarfeelAndKhaban': 'فَعِلَاتُن',
+    'فعولن|Qabadh': 'فَعُولُ', 'فعولن|Thalm': 'فَعْلُن', 'فعولن|Tharm': 'فَعْلُ', 'فعولن|Hadhf': 'فَعُو', 'فعولن|Qasar': 'فَعُولْ', 'فعولن|Qataa': 'فَعُولْ', 'فعولن|Batr': 'فَعْ', 'فعولن|ThalmAndQasar': 'فَعْلْ',
+    'مفاعيلن|Qabadh': 'مَفَاعِلُن', 'مفاعيلن|Kaff': 'مَفَاعِيلُ', 'مفاعيلن|Hadhf': 'فَعُولُن',
+    'متفاعلن|Edmaar': 'مُتْفَاعِلُن', 'متفاعلن|Waqas': 'مُفَاعِلُن', 'متفاعلن|Khazal': 'مُتْفَعِلُن', 'متفاعلن|Qataa': 'مُتَفَاعِلْ', 'متفاعلن|QataaAndEdmaar': 'مُتْفَاعِلْ',
+    'متفاعلن|Hathath': 'مُتَفَا', 'متفاعلن|HathathAndEdmaar': 'مُتْفَا', 'متفاعلن|Tatheel': 'مُتَفَاعِلَان', 'متفاعلن|TatheelAndEdmaar': 'مُتْفَاعِلَان', 'متفاعلن|Tarfeel': 'مُتَفَاعِلَاتُن', 'متفاعلن|TarfeelAndEdmaar': 'مُتْفَاعِلَاتُن',
+    'مفاعلتن|Asab': 'مُفَاعَلْتُن', 'مفاعلتن|Akal': 'مُفَاعَتُن', 'مفاعلتن|Nakas': 'مُفَاعَلْتُ', 'مفاعلتن|Qataf': 'مُفَاعَلْ',
+    'مفعولات|Khaban': 'مَعُولَاتُ', 'مفعولات|Tay': 'مَفْعُلَاتُ', 'مفعولات|Khabal': 'مَعُلَاتُ', 'مفعولات|Kasf': 'مَفْعُولَا', 'مفعولات|TayAndKasf': 'مَفْعُلَا', 'مفعولات|KhabalAndKasf': 'مَعُلَا',
+    'مفعولات|Waqf': 'مَفْعُولَاتْ', 'مفعولات|WaqfAndTay': 'مَفْعُلَاتْ', 'مفعولات|Salam': 'مَفْعُو',
+    'فاعلاتن|Khaban': 'فَعِلَاتُن', 'فاعلاتن|Kaff': 'فَاعِلَاتُ', 'فاعلاتن|Shakal': 'فَعِلَاتُ', 'فاعلاتن|Hadhf': 'فَاعِلَا', 'فاعلاتن|HadhfAndKhaban': 'فَعِلَا', 'فاعلاتن|Tasbeegh': 'فَاعِلَاتَان',
+    'فاعلاتن|Qataa': 'فَاعِلَاتْ', 'فاعلاتن|Qasar': 'فَاعِلَاتْ', 'فاعلاتن|KhabanAndQataa': 'فَعِلَاتْ', 'فاعلاتن|Batr': 'فَاعِلْ', 'فاعلاتن|Tasheeth': 'فَالَاتُن',
+    'مستفع لن|Khaban': 'مُتَفْعِ لُن', 'مستفع لن|Kaff': 'مُسْتَفْعِ لُ', 'مستفع لن|Shakal': 'مُتَفْعِ لُ', 'مستفع لن|KhabanAndQataa': 'مُتَفْعِ لْ', 'فاع لاتن|Kaff': 'فَاعِ لَاتُ'
+  };
+  let D = { settings: {}, rujukan: [], bank: [], rekod: [] };
+  let IDX = { rujukan: [], bank: [], rekod: [] };
+  let LAST = null; // keputusan semakan terakhir
+
+  /* ───────────── Server ───────────── */
+  let ROLE = 'pelajar';               // 'pelajar' (lalai) atau 'guru' selepas PIN
+  const WRITE_FNS = ['saveRekod', 'saveBank', 'saveRujukan', 'updateField', 'deleteById', 'saveSet', 'saveSetOrder', 'luluskanPermohonan', 'tolakPermohonan', 'janaKodManual', 'urusKod', 'setModAkses'];
+  const setPin = v => { try { v ? sessionStorage.setItem('pinGuru', v) : sessionStorage.removeItem('pinGuru'); } catch (e) {} };
+  const getPin = () => { try { return sessionStorage.getItem('pinGuru') || ''; } catch (e) { return ''; } };
+  function call(fn, ...args) {
+    if (WRITE_FNS.includes(fn)) args.push(getPin());
+    return new Promise((res, rej) => {
+      google.script.run.withSuccessHandler(res).withFailureHandler(e => rej(e && e.message ? e : new Error(String(e))))[fn](...args);
+    });
+  }
+  function toast(msg, err) {
+    const t = $('#toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+    clearTimeout(toast._t); toast._t = setTimeout(() => { t.className = ''; }, err ? 6000 : 3000);
+  }
+
+  /* ───────────── Teks Arab ───────────── */
+  const HAR = /[ً-ْٰـ]/g;
+  function norm(s) {
+    return String(s || '').replace(HAR, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+      .replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/[^ء-ي]/g, '');
+  }
+  function grams(s) { const n = norm(s), g = new Set(); for (let i = 0; i + 3 <= n.length; i++) g.add(n.substr(i, 3)); return g; }
+  function containment(Q, R) { if (!Q.size) return 0; let c = 0; Q.forEach(x => { if (R.has(x)) c++; }); return c / Q.size; }
+  function letterCount(s) { return (String(s).match(/[ء-ي]/g) || []).length; }
+  function harakatDensity(s) {
+    const words = String(s).split(/\s+/).filter(Boolean);
+    let L = 0, M = 0;
+    words.forEach(w => { // abaikan huruf terakhir setiap kata (sering tanpa baris)
+      const letters = (w.match(/[ء-ي]/g) || []).length; L += Math.max(0, letters - 1);
+      M += (w.slice(0, -1).match(/[ً-ْ]/g) || []).length;
+    });
+    return L ? Math.min(1, M / L) : 0;
+  }
+  /** Teks → senarai bait [[sadr, ajuz], ...]. Menerima ‖ sebagai pemisah bait. */
+  function parseVerses(text) {
+    return String(text).split(/\n|‖/).map(l => l.trim()).filter(Boolean).map(l => {
+      if (l.includes('#')) { const i = l.indexOf('#'); return [l.slice(0, i).trim(), l.slice(i + 1).replace(/#/g, ' ').trim()]; }
+      return [l, ''];
+    }).filter(v => v[0] || v[1]);
+  }
+  const toSheetText = verses => verses.map(([s, a]) => a ? s + ' # ' + a : s).join(' ‖ ');
+
+  function renderPoem(teks, small, hlNorm) {
+    const lines = parseVerses(teks);
+    const hl = w => {
+      if (!hlNorm) return esc(w);
+      const n = norm(w);
+      return n.length >= 2 && hlNorm.includes(n) ? '<mark>' + esc(w) + '</mark>' : esc(w);
+    };
+    const sh = s => s.split(/\s+/).map(hl).join(' ');
+    return '<div class="poem' + (small ? ' small' : '') + '">' + lines.map(([s, a]) =>
+      a ? '<div class="bait"><div class="shatr">' + sh(s) + '</div><div class="shatr">' + sh(a) + '</div></div>'
+        : '<div class="bait single"><div class="shatr">' + sh(s) + '</div></div>').join('') + '</div>';
+  }
+
+  /* ───────────── Indeks padanan ───────────── */
+  function buildIndex() {
+    IDX.rujukan = D.rujukan.map(r => ({ r, g: grams(r.Teks) }));
+    IDX.bank = D.bank.map(r => ({ r, g: grams(r.Teks) }));
+    IDX.rekod = (ROLE === 'guru' ? D.rekod : (D.rekodLite || [])).map(r => ({ r, g: grams(r.Teks) }));
+  }
+  function topMatches(Q, list, n) {
+    return list.map(x => ({ r: x.r, s: containment(Q, x.g) })).sort((a, b) => b.s - a.s).slice(0, n);
+  }
+
+  /* ───────────── Laqob, 'arudh, dharb ───────────── */
+  function cleanZ(z) {
+    z = String(z || '').trim();
+    if (!z || z.startsWith('سالمة')) return 'صحيحة';
+    if (z.startsWith('زيادة') || z.startsWith('مفقودة')) return '';
+    return z.replace(/\s*\(.*?\)\s*/g, '').trim();
+  }
+  function masculine(z) {
+    if (!z) return '';
+    return z.split(/\s+/).map(w => w === 'حذاء' ? 'أحذ' : w.replace(/ة$/, '')).join(' ');
+  }
+  const realFeet = sh => (sh && sh.feet ? sh.feet.filter(f => f.status !== 'extra_bits' && f.status !== 'missing') : []);
+  function describe(res, verses) {
+    const vs = res.verses || [];
+    const hasAjuz = verses.some(v => v[1]);
+    const counts = {};
+    vs.forEach(v => { counts[v.bahr_type] = (counts[v.bahr_type] || 0) + 1; });
+    let type = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || 'tam';
+    const info = ArudJS.meterInfo(res.meter);
+    if (hasAjuz && (type === 'mashtoor' || type === 'manhook')) {
+      const n = realFeet(vs[0] && vs[0].sadr).length;
+      type = n >= info.taf.length ? 'tam' : 'majzoo';
+    }
+    const v0 = vs[0] || {};
+    const sF = realFeet(v0.sadr), aF = realFeet(v0.ajuz);
+    let arudh = '', dharb = '';
+    if (hasAjuz) { arudh = cleanZ(sF.length ? sF[sF.length - 1].zihaf_name_ar : ''); dharb = masculine(cleanZ(aF.length ? aF[aF.length - 1].zihaf_name_ar : '')); }
+    else { arudh = ''; dharb = masculine(cleanZ(sF.length ? sF[sF.length - 1].zihaf_name_ar : '')); }
+    const exact = vs.length && vs.every(v => v.exact && v.is_valid);
+    // Keyakinan: padanan tepat dinilai dari kos zihaf (zihaf jarang = kurang wajar); anggaran = skor kemiripan corak
+    const conf = v => {
+      if (!v.exact) return Math.min(0.89, v.score || 0);
+      const hashw = sh => (sh && sh.feet ? sh.feet.slice(0, -1) : []); // 'arudh & dharb tidak dikira
+      const cost = hashw(v.sadr).concat(hashw(v.ajuz)).reduce((s, f) => s + (f.cost || 0), 0);
+      return Math.max(0.5, 1 - 0.025 * cost);
+    };
+    const avg = vs.length ? vs.reduce((s, v) => s + conf(v), 0) / vs.length : 0;
+    return { key: res.meter, ar: BAHAR_AR[res.meter] || res.meter, laqob: LAQOB_OF[type] || 'التام', arudh, dharb, score: Math.min(1, avg), exact, res };
+  }
+
+  function analyse(verses) {
+    const def = ArudJS.processPoem(verses);
+    const list = [];
+    if (!def.error) list.push(describe(def, verses));
+    const others = ArudJS.METER_KEYS.filter(k => !list.length || k !== list[0].key).map(k => {
+      const r = ArudJS.processPoem(verses, k);
+      return r.error ? null : describe(r, verses);
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    while (list.length < 3 && others.length) list.push(others.shift());
+    return list;
+  }
+
+  /* ───────────── Semak ───────────── */
+  function runSemak() {
+    const text = $('#inText').value.trim();
+    if (!text) { toast('Tampal sekurang-kurangnya satu bait dahulu.', true); return; }
+    const verses = parseVerses(text);
+    const s = D.settings, TOLAK = Number(s.Ambang_Tolak) || 70, RAGU = Number(s.Ambang_Ragu) || 40, MIN = Number(s.Min_Huruf) || 15;
+    const Q = grams(text);
+    const rujTop = topMatches(Q, IDX.rujukan, 3);
+    const best = rujTop[0] ? rujTop[0].s : 0, pct = Math.round(best * 100);
+    const level = pct >= TOLAK ? 'tolak' : pct >= RAGU ? 'ragu' : 'lulus';
+    const short = letterCount(text) < MIN;
+
+    // Verdict
+    const T = { tolak: ['Dari buku teks — ditolak', 'Syair ini sepadan dengan bait buku teks. Pelajar perlu memilih syair lain.'],
+      ragu: ['Meragukan — guru perlu semak', 'Ada persamaan dengan bait buku teks. Bandingkan di bawah sebelum membuat keputusan.'],
+      lulus: ['Bukan dari buku teks', 'Tiada padanan bermakna dengan senarai buku teks.'] }[level];
+    let ref = '';
+    if (rujTop[0] && level !== 'lulus') ref = ' Paling hampir: ' + esc(rujTop[0].r.Bahar) + ', halaman ' + esc(rujTop[0].r.Halaman || '—') + '.';
+    $('#verdict').innerHTML = '<div class="verdict ' + level + '"><div class="ring" role="img" aria-label="Padanan ' + pct + '%"><svg viewBox="0 0 92 92"><circle class="track" cx="46" cy="46" r="40"/><circle class="val" cx="46" cy="46" r="40"/></svg><div class="num">' + pct + '%</div></div>' +
+      '<div><div class="title">' + T[0] + '</div><div class="desc">' + T[1] + ref + (short ? ' <b>Teks terlalu pendek untuk semakan yang boleh dipercayai.</b>' : '') + '</div></div></div>';
+    requestAnimationFrame(() => requestAnimationFrame(() => { const c = $('#verdict .val'); if (c) c.style.strokeDashoffset = String(251.3 * (1 - Math.min(1, best))); }));
+
+    // Pernah digunakan / sudah dalam bank
+    const prev = topMatches(Q, IDX.rekod, 8).filter(m => m.s * 100 >= RAGU);
+    const inBank = topMatches(Q, IDX.bank, 3).filter(m => m.s * 100 >= TOLAK);
+    let notes = '';
+    if (prev.length) notes += '<div class="notice"><b>Syair ini pernah digunakan.</b> Ini sekadar makluman — sesetengah bentuk syair memang terhad.<ul>' +
+      prev.map(m => '<li>' + (ROLE === 'guru' ? esc(m.r.Nama_Pelajar) + (m.r.Kelas ? ' (' + esc(m.r.Kelas) + ')' : '') + ', ' : 'Pelajar tahun ') + esc(m.r.Tahun) + ' — ' + Math.round(m.s * 100) + '% sama</li>').join('') + '</ul></div>';
+    if (inBank.length && ROLE === 'guru') notes += '<div class="notice info">Sudah ada dalam Bank Contoh: ' + inBank.map(m => esc(m.r.ID) + ' (' + Math.round(m.s * 100) + '%)').join(', ') + '.</div>';
+    $('#crossNotes').innerHTML = notes;
+
+    const qn = norm(text);
+    $('#matches').innerHTML = rujTop.length ? rujTop.map(m => '<div class="match"><div class="m-head"><span><b>' + Math.round(m.s * 100) + '%</b> · ' + esc(m.r.ID) + '</span><span>' +
+      esc(m.r.Bahar) + ' ' + esc(m.r.Laqob) + ' · hlm. ' + esc(m.r.Halaman || '—') + '</span></div>' + renderPoem(m.r.Teks, true, qn) + '</div>').join('')
+      : '<p class="empty">Senarai buku teks masih kosong. Tampal Rujukan_BukuTeks.tsv ke Sheet.</p>';
+    $('#matchBox').open = level !== 'lulus';
+
+    // Taqti'
+    const dens = harakatDensity(text);
+    $('#densityWarn').innerHTML = dens < 0.6 ? '<div class="notice">Baris tidak lengkap (kira-kira ' + Math.round(dens * 100) + '% huruf berbaris). Taqti\' mungkin tidak tepat — lengkapkan baris, terutama sukun dan baris sebelum huruf mad.</div>' : '';
+    $('#cands').innerHTML = '<span class="meta-note">Menganalisis…</span>'; $('#taqti').innerHTML = '';
+    $('#semakOut').classList.remove('hidden');
+    LAST = { text, verses, level, pct, rujTop, prev, cands: [], sel: 0 };
+    setTimeout(() => {
+      try { LAST.cands = analyse(verses); } catch (e) { console.error(e); LAST.cands = []; }
+      renderCands(); prefillForm();
+    }, 30);
+    applySaveRules();
+  }
+
+  function renderCands() {
+    const c = LAST.cands;
+    if (!c.length) { $('#cands').innerHTML = '<p class="empty">Sistem tidak dapat mengenal pasti bahar. Semak baris dan tanda #.</p>'; $('#taqti').innerHTML = ''; return; }
+    $('#cands').innerHTML = c.map((x, i) => '<button type="button" class="cand" aria-pressed="' + (i === LAST.sel) + '" data-i="' + i + '"><div class="c-name">' + esc(x.ar) + ' ' + esc(x.laqob) + '</div>' +
+      '<div class="c-meta"><span>' + Math.round(x.score * 100) + '%</span><span class="' + (x.exact ? 'exact">padanan tepat' : 'approx">anggaran') + '</span></div><div class="bar"><i style="width:' + Math.round(x.score * 100) + '%"></i></div></button>').join('');
+    $$('#cands .cand').forEach(b => b.addEventListener('click', () => { LAST.sel = +b.dataset.i; renderCands(); prefillForm(); }));
+    const top = c[0];
+    $('#taqtiHint').textContent = top.score < 0.6
+      ? 'Keyakinan rendah (' + Math.round(top.score * 100) + '%). Kemungkinan baris tidak lengkap, ada kesilapan ejaan, atau bait mudawwar. Semak setiap calon.'
+      : 'Calon bahar disusun mengikut keyakinan sistem. Pilih calon untuk melihat pecahan taf\'ilah.';
+    renderTaqti(c[LAST.sel]);
+  }
+
+  function sym(p) { return '<div class="sym" aria-label="' + p + '">' + p.split('').map(d => '<span>' + (d === '1' ? '/' : '0') + '</span>').join('') + '</div>'; }
+  function footHtml(f) {
+    const salim = /^سالمة/.test(f.zihaf_name_ar);
+    const cls = f.status !== 'ok' ? 'bad' : (salim ? '' : 'mod');
+    const name = f.status === 'ok' ? ((f.zihaf_key && FORM_NAME[f.base_tafeela + '|' + f.zihaf_key]) || f.actual_name || f.base_tafeela) : (f.base_tafeela || '؟');
+    return '<div class="foot ' + cls + '">' + sym(f.actual_segment === 'MISSING' ? '' : f.actual_segment) + '<div class="tf">' + esc(name) + '</div><div class="zh">' + esc(cleanZ(f.zihaf_name_ar) || f.zihaf_name_ar) + '</div></div>';
+  }
+  function halfHtml(sh) {
+    if (!sh) return '';
+    return '<div class="half"><div class="src">' + esc(sh.text) + '</div><div class="arudi">' + esc(sh.arudi_text) + '</div><div class="feet">' + sh.feet.map(footHtml).join('') + '</div></div>';
+  }
+  function renderTaqti(c) {
+    $('#taqti').innerHTML = c.res.verses.map((v, i) => '<div class="taqti"><div class="b-label">Bait ' + (i + 1) + ' · ' + Math.round(Math.min(1, v.score) * 100) + '%' + (v.exact ? '' : ' · anggaran') + '</div><div class="halves' + (v.ajuz ? '' : ' single') + '">' +
+      halfHtml(v.sadr) + halfHtml(v.ajuz) + '</div></div>').join('');
+  }
+
+  /* ───────────── Borang simpan ───────────── */
+  function fillSelect(sel, items, withAll) {
+    sel.innerHTML = (withAll ? '<option value="">' + withAll + '</option>' : '') + items.map(x => '<option>' + esc(x) + '</option>').join('');
+  }
+  function prefillForm() {
+    const f = $('#saveForm'); const c = LAST.cands[LAST.sel];
+    if (!f.Tahun.value) f.Tahun.value = THIS_YEAR;
+    if (c) { f.Bahar.value = c.ar; f.Laqob.value = c.laqob; f.Arudh.value = c.arudh; f.Dharb.value = c.dharb; }
+  }
+  function applySaveRules() {
+    const f = $('#saveForm'), lv = LAST && LAST.level;
+    $('#confirmRow').classList.toggle('hidden', lv !== 'ragu');
+    f.confirm.checked = false;
+    $('#btnSave').disabled = lv === 'tolak';
+    $('#saveHint').textContent = lv === 'tolak'
+      ? 'Syair dari buku teks tidak boleh disimpan sebagai kerja kursus. Minta pelajar memilih syair lain.'
+      : 'Semak bahar dan laqob sebelum menyimpan. Syair disimpan ke Rekod_Pelajar mengikut tahun.';
+  }
+  function formRecord() {
+    const f = $('#saveForm');
+    const c = LAST.cands[LAST.sel];
+    return {
+      Tahun: f.Tahun.value, Nama_Pelajar: f.Nama_Pelajar.value, Kelas: f.Kelas.value, Teks: toSheetText(LAST.verses),
+      Bahar: f.Bahar.value, Laqob: f.Laqob.value, Arudh: f.Arudh.value, Dharb: f.Dharb.value, Penyair_Sumber: f.Penyair_Sumber.value,
+      Skor_BukuTeks: LAST.pct, Padanan_BukuTeks: LAST.rujTop[0] && LAST.pct >= (Number(D.settings.Ambang_Ragu) || 40) ? LAST.rujTop[0].r.ID : '',
+      Amaran_Pernah_Guna: LAST.prev.map(m => (m.r.Nama_Pelajar || 'pelajar') + ' ' + m.r.Tahun).join('; '),
+      Catatan: f.Catatan.value + (LAST.level === 'ragu' ? (f.Catatan.value ? ' | ' : '') + 'Disahkan guru (padanan ' + LAST.pct + '%)' : ''),
+      Bil_Bait: LAST.verses.length, Skor_Sistem: c ? Math.round(c.score * 100) / 100 : ''
+    };
+  }
+  async function onSave(e) {
+    e.preventDefault();
+    if (!LAST) return;
+    const f = $('#saveForm');
+    if (LAST.level === 'tolak') return;
+    if (LAST.level === 'ragu' && !f.confirm.checked) { toast('Tandakan pengesahan guru dahulu kerana padanan meragukan.', true); return; }
+    if (!f.Nama_Pelajar.value.trim()) { toast('Isi nama pelajar.', true); f.Nama_Pelajar.focus(); return; }
+    const rec = formRecord();
+    $('#btnSave').disabled = true;
+    try {
+      const out = await call('saveRekod', rec, f.alsoBank.checked);
+      D.rekod.push(out.rekod); if (out.bank) D.bank.push(out.bank);
+      buildIndex(); renderCounts();
+      toast('Disimpan: ' + out.rekod.ID + (out.bank ? ' dan ' + out.bank.ID : ''));
+      f.Nama_Pelajar.value = ''; f.Kelas.value = ''; f.Catatan.value = ''; f.Penyair_Sumber.value = '';
+    } catch (err) { toast(err.message, true); }
+    $('#btnSave').disabled = LAST.level === 'tolak';
+  }
+  async function onBankOnly() {
+    if (!LAST) return;
+    if (LAST.level === 'tolak') { toast('Bait buku teks tidak dimasukkan ke Bank Contoh.', true); return; }
+    const r = formRecord();
+    try {
+      const out = await call('saveBank', { Bahar: r.Bahar, Laqob: r.Laqob, Arudh: r.Arudh, Dharb: r.Dharb, Teks: r.Teks, Bil_Bait: r.Bil_Bait,
+        Penyair: r.Penyair_Sumber, Sumber: 'Tambahan guru', Skor_Sistem: r.Skor_Sistem, Status: 'Sah', Catatan: r.Catatan });
+      D.bank.push(out); buildIndex(); renderCounts(); toast('Ditambah ke Bank Contoh: ' + out.ID);
+    } catch (err) { toast(err.message, true); }
+  }
+
+  /* ───────────── Rekod ───────────── */
+  function renderRekod() {
+    const y = $('#fRTahun').value, b = $('#fRBahar').value, l = $('#fRLaqob').value, q = $('#fRCari').value.trim().toLowerCase();
+    const rows = D.rekod.filter(r => (!y || String(r.Tahun) === y) && (!l || r.Laqob === l) &&
+      (!q || (String(r.Nama_Pelajar) + ' ' + r.Kelas).toLowerCase().includes(q)));
+    const per = {}; rows.forEach(r => { per[r.Bahar] = (per[r.Bahar] || 0) + 1; });
+    $('#rekodSummary').innerHTML = Object.keys(per).sort((a, c) => per[c] - per[a]).map(k => '<button type="button" aria-pressed="' + (b === k) + '" data-b="' + esc(k) + '">' + esc(k) + '<span class="n">' + per[k] + '</span></button>').join('');
+    $$('#rekodSummary button').forEach(x => x.addEventListener('click', () => { $('#fRBahar').value = $('#fRBahar').value === x.dataset.b ? '' : x.dataset.b; renderRekod(); }));
+    const shown = rows.filter(r => !b || r.Bahar === b).sort((a, c) => String(c.Tarikh).localeCompare(String(a.Tarikh)));
+    $('#rekodList').innerHTML = shown.length ? '<table class="list"><thead><tr><th>Pelajar</th><th>Syair</th><th>Bahar / laqob</th><th>Buku teks</th><th></th></tr></thead><tbody>' +
+      shown.map(r => '<tr><td><b>' + esc(r.Nama_Pelajar) + '</b><br><span class="meta-note">' + esc(r.Kelas) + ' · ' + esc(r.Tahun) + '</span>' +
+        (r.Amaran_Pernah_Guna ? '<br><span class="pill semak">pernah digunakan</span>' : '') + '</td><td class="ar">' + renderPoem(firstBait(r.Teks), true) + '</td>' +
+        '<td class="ar">' + esc(r.Bahar) + ' ' + esc(r.Laqob) + '<div class="meta-note" style="font-family:var(--ar)">' + [r.Arudh ? 'عروض ' + esc(r.Arudh) : '', r.Dharb ? 'ضرب ' + esc(r.Dharb) : ''].filter(Boolean).join('، ') + '</div></td>' +
+        '<td>' + esc(r.Skor_BukuTeks) + '%</td><td><button class="btn small danger" data-del="' + esc(r.ID) + '">Padam</button></td></tr>').join('') + '</tbody></table>'
+      : '<p class="empty">Tiada rekod untuk tapisan ini. Rekod baharu ditambah dari tab Semak syair.</p>';
+    bindDelete('#rekodList', SHEET.REKOD, D.rekod, renderRekod);
+  }
+  const firstBait = t => String(t || '').split('‖')[0];
+
+  function bindDelete(root, sheet, arr, rerender) {
+    $$(root + ' [data-del]').forEach(btn => btn.addEventListener('click', async () => {
+      if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = 'Sahkan padam'; setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Padam'; }, 4000); return; }
+      btn.disabled = true;
+      try { await call('deleteById', sheet, btn.dataset.del); const i = arr.findIndex(r => r.ID === btn.dataset.del); if (i >= 0) arr.splice(i, 1); buildIndex(); renderCounts(); rerender(); toast('Dipadam: ' + btn.dataset.del); }
+      catch (err) { toast(err.message, true); btn.disabled = false; }
+    }));
+  }
+
+  /* ───────────── Bank ───────────── */
+  function statusPill(s) { const c = s === 'Sah' ? 'sah' : s === 'Ditolak' ? 'tolak' : 'semak'; return '<span class="pill ' + c + '">' + esc(s || 'Perlu Semak') + '</span>'; }
+  function renderBank() {
+    const b = $('#fBBahar').value, l = $('#fBLaqob').value, st = $('#fBStatus').value;
+    const base = D.bank.filter(r => (!l || r.Laqob === l) && (!st || (r.Status || 'Perlu Semak') === st));
+    const per = {}; base.forEach(r => { per[r.Bahar] = (per[r.Bahar] || 0) + 1; });
+    $('#bankSummary').innerHTML = Object.keys(per).sort((x, y) => per[y] - per[x]).map(k => '<button type="button" aria-pressed="' + (b === k) + '" data-b="' + esc(k) + '">' + esc(k) + '<span class="n">' + per[k] + '</span></button>').join('');
+    $$('#bankSummary button').forEach(x => x.addEventListener('click', () => { $('#fBBahar').value = $('#fBBahar').value === x.dataset.b ? '' : x.dataset.b; renderBank(); }));
+    const rows = base.filter(r => !b || r.Bahar === b);
+    $('#bankList').innerHTML = rows.length ? rows.map(r => '<div class="item"><div class="i-head"><span class="i-tags">' + esc(r.Bahar) + ' ' + esc(r.Laqob) +
+      (r.Dharb ? ' <span style="font-weight:400;color:var(--ink-2)">— ضرب ' + esc(r.Dharb) + '</span>' : '') + '</span><span class="row">' + statusPill(r.Status) +
+      '<button class="btn small ghost" data-use="' + esc(r.ID) + '">Taqti\'</button>' +
+      ((r.Status || 'Perlu Semak') !== 'Sah' ? '<button class="btn small ghost" data-st="Sah" data-id="' + esc(r.ID) + '">Sahkan</button>' : '') +
+      ((r.Status || 'Perlu Semak') !== 'Ditolak' ? '<button class="btn small ghost" data-st="Ditolak" data-id="' + esc(r.ID) + '">Tolak</button>' : '') +
+      '</span></div>' + renderPoem(r.Teks, true) + '<div class="i-src">' + esc(r.ID) + (r.Penyair ? ' · ' + esc(r.Penyair) : '') + (r.Zaman ? ' · ' + esc(r.Zaman) : '') + (r.Sumber ? ' · ' + esc(r.Sumber) : '') + '</div></div>').join('')
+      : '<p class="empty">Tiada contoh untuk tapisan ini. Tampal Bank_Contoh_Syair.tsv ke Sheet, atau simpan contoh dari tab Semak syair.</p>';
+    $$('#bankList [data-st]').forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try { await call('updateField', SHEET.BANK, btn.dataset.id, 'Status', btn.dataset.st); const r = D.bank.find(x => x.ID === btn.dataset.id); if (r) r.Status = btn.dataset.st; renderBank(); toast(btn.dataset.id + ': ' + btn.dataset.st); }
+      catch (err) { toast(err.message, true); btn.disabled = false; }
+    }));
+    $$('#bankList [data-use]').forEach(btn => btn.addEventListener('click', () => {
+      const r = D.bank.find(x => x.ID === btn.dataset.use); if (!r) return;
+      $('#inText').value = parseVerses(r.Teks).map(([s, a]) => a ? s + ' # ' + a : s).join('\n'); show('semak'); updateStat(); runSemak(); window.scrollTo(0, 0);
+    }));
+  }
+
+  /* ───────────── Rujukan ───────────── */
+  function renderRuj() {
+    const b = $('#fTBahar').value;
+    const rows = D.rujukan.filter(r => !b || r.Bahar === b);
+    $('#rujList').innerHTML = rows.length ? rows.map(r => '<div class="item"><div class="i-head"><span class="i-tags">' + esc(r.Bahar) + ' ' + esc(r.Laqob) +
+      (r.Dharb ? ' <span style="font-weight:400;color:var(--ink-2)">— ضرب ' + esc(r.Dharb) + '</span>' : '') + '</span><span class="row"><span class="meta-note">' + esc(r.ID) + ' · hlm. ' + esc(r.Halaman || '—') + '</span>' +
+      '<button class="btn small danger" data-del="' + esc(r.ID) + '">Padam</button></span></div>' + renderPoem(r.Teks, true) + '</div>').join('')
+      : '<p class="empty">Senarai buku teks kosong. Tampal Rujukan_BukuTeks.tsv ke tab Rujukan_BukuTeks, atau tambah di bawah.</p>';
+    bindDelete('#rujList', SHEET.RUJ, D.rujukan, renderRuj);
+  }
+  async function onRujAdd(e) {
+    e.preventDefault(); const f = e.target;
+    try {
+      const out = await call('saveRujukan', { Bahar: f.Bahar.value, Laqob: f.Laqob.value, Halaman: f.Halaman.value, Catatan: f.Catatan.value, Teks: toSheetText(parseVerses(f.Teks.value)) });
+      D.rujukan.push(out); buildIndex(); renderCounts(); renderRuj(); f.Teks.value = ''; f.Halaman.value = ''; f.Catatan.value = ''; toast('Ditambah: ' + out.ID);
+    } catch (err) { toast(err.message, true); }
+  }
+
+  /* ───────────── Umum ───────────── */
+  const GURU_VIEWS = ['set', 'rekod', 'bank', 'rujukan', 'akses'];
+  function show(view) {
+    if (GURU_VIEWS.includes(view) && ROLE !== 'guru') view = 'latihan';
+    $$('nav.tabs button, nav.nav button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
+    $$('section.view').forEach(s => s.classList.toggle('active', s.id === 'view-' + view));
+    if (view === 'rekod') renderRekod(); if (view === 'bank') renderBank(); if (view === 'rujukan') renderRuj();
+    if (view === 'latihan' && window.Latihan) window.Latihan.onShow();
+    if (view === 'set' && window.Sets) window.Sets.onShow();
+    if (view === 'akses' && window.Akses) window.Akses.onShow();
+  }
+  function currentView() { const s = $('section.view.active'); return s ? s.id.replace('view-', '') : 'semak'; }
+  function renderCounts() {
+    if (ROLE !== 'guru') return;
+    $('#cSet').textContent = (D.setsAll || []).length; $('#cRekod').textContent = D.rekod.length; $('#cBank').textContent = D.bank.length; $('#cRuj').textContent = D.rujukan.length;
+    const years = Array.from(new Set(D.rekod.map(r => String(r.Tahun)).concat([String(THIS_YEAR)]))).sort().reverse();
+    const cur = $('#fRTahun').value || String(THIS_YEAR);
+    fillSelect($('#fRTahun'), years, 'Semua tahun'); $('#fRTahun').value = cur;
+  }
+  function updateStat() {
+    const v = parseVerses($('#inText').value);
+    $('#inStat').textContent = v.length ? v.length + ' baris dikesan' : '';
+  }
+
+  /* ───────────── Peranan ───────────── */
+  function applyRole() {
+    const g = ROLE === 'guru';
+    $$('.guru-only').forEach(el => el.classList.toggle('hidden', !g));
+    $('#savePanel').classList.toggle('hidden', !g);
+    $('#studentNext').classList.toggle('hidden', g);
+    const b = $('#btnGuru');
+    b.classList.toggle('on', g);
+    b.innerHTML = '<svg class="i"><use href="#i-' + (g ? 'unlock' : 'lock') + '"/></svg><span>' + (g ? 'Guru · Kunci' : 'Guru') + '</span>';
+    b.setAttribute('aria-label', g ? 'Kunci semula mod guru' : 'Buka akses guru');
+    const base = D.settings && D.settings.Nama_Sekolah ? D.settings.Nama_Sekolah + ' — ' : '';
+    $('#schoolName').textContent = base + (g ? 'mod guru' : 'Latihan \'Arudh & Qafiyah');
+    if (!g && GURU_VIEWS.includes(currentView())) show('latihan');
+    buildIndex(); renderCounts();
+    if (LAST) { applySaveRules(); }
+    if (window.Latihan) window.Latihan.refresh();
+    if (window.Akses) { window.Akses.applyGate(); if (g) window.Akses.renderGuru(); }
+  }
+  async function unlock(pin, silent) {
+    try {
+      const g = await new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej).getGuruData(pin));
+      setPin(pin); ROLE = 'guru'; D.rekod = g.rekod || []; D.bank = g.bank || D.bank; D.setsAll = g.setsAll || []; D.jawapan = g.jawapan || []; D.mohon = g.mohon || []; D.kod = g.kod || [];
+      D.sets = D.setsAll.filter(s => s.Status === 'Aktif');
+      applyRole();
+      if (!silent) toast('Mod guru dibuka.');
+      return true;
+    } catch (e) { setPin(''); if (!silent) toast('PIN tidak betul.', true); return false; }
+  }
+  function lock() {
+    setPin(''); ROLE = 'pelajar'; D.rekod = []; D.bank = (D.bank || []).filter(r => r.Status !== 'Ditolak'); D.setsAll = []; D.jawapan = []; D.mohon = []; D.kod = [];
+    applyRole(); toast('Mod guru dikunci.');
+  }
+  function openPin() {
+    const dlg = $('#pinPanel'), inp = $('#pinInput');
+    const set = !!D.pinSet;
+    $('#pinHint').innerHTML = set ? 'Masukkan PIN guru untuk membuka Rekod, Bank contoh, Buku teks serta fungsi simpan dan padam.'
+      : 'PIN guru belum ditetapkan. Isi <b>PIN_Guru</b> dalam tab <b>Tetapan</b> di Google Sheet dahulu — tanpa PIN, akses guru dikunci untuk keselamatan.';
+    inp.disabled = !set; inp.value = '';
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+    if (set) setTimeout(() => inp.focus(), 30);
+  }
+
+  /* ───────────── Tema ───────────── */
+  function setTheme(t, save) {
+    document.documentElement.setAttribute('data-theme', t === 'gelap' ? 'dark' : 'light');
+    $$('[data-theme-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeSet === t)));
+    if (save) { try { localStorage.setItem('tema', t); } catch (e) {} }
+  }
+
+  function init(data) {
+    D = data; D.rekod = []; D.bank = D.bank || []; D.rujukan = D.rujukan || []; D.rekodLite = D.rekodLite || [];
+    $('#loading').classList.add('hidden');
+    $('#foot').textContent = 'Versi ' + (D.version || '') + ' · Enjin taqti\' berasaskan PyArud (MIT)';
+    const bah = BAHAR.map(b => b.ar);
+    $$('select[name="Bahar"]').forEach(s => fillSelect(s, bah));
+    $$('select[name="Laqob"]').forEach(s => fillSelect(s, LAQOB));
+    fillSelect($('#fRBahar'), bah, 'Semua'); fillSelect($('#fRLaqob'), LAQOB, 'Semua');
+    fillSelect($('#fBBahar'), bah, 'Semua'); fillSelect($('#fBLaqob'), LAQOB, 'Semua');
+    fillSelect($('#fTBahar'), bah, 'Semua');
+    $('#saveForm').Tahun.value = THIS_YEAR;
+    D.sets = D.sets || [];
+    if (window.Latihan) window.Latihan.init();
+    if (window.Sets) window.Sets.init();
+    applyRole();
+    show('latihan'); if (window.Latihan) window.Latihan.setMode('set');   // paparan lalai: set daripada guru
+    if (window.Akses) window.Akses.init();
+    if (getPin()) unlock(getPin(), true);
+  }
+
+  const SAMPLES = ['إِنّي تَرَكتُ الصِبا عَمداً وَلَم أَكَدِ # مِن غَيرِ شَيبٍ وَلا عَمدٍ وَلا فَنَدِ',
+    'لَمّا رَأَيتُ الأَمرَ أَمراً جِدّا\nوَلَم أَجِد مِنَ القِيامِ بُدّا\nلَبِستُ جِلدَ نَمِرٍ مُعتَدّا',
+    'أَبُنَيَّتِي لَا تَجْزَعِي # كُلُّ الْأَنَامِ إِلَى ذَهَابْ'];
+  document.addEventListener('DOMContentLoaded', () => {
+    $$('nav.nav button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+    $('#btnSemak').addEventListener('click', runSemak);
+    $('#btnClear').addEventListener('click', () => { $('#inText').value = ''; $('#semakOut').classList.add('hidden'); updateStat(); $('#inText').focus(); });
+    $('#btnSample').addEventListener('click', () => { $('#inText').value = SAMPLES[Math.floor(Math.random() * SAMPLES.length)]; updateStat(); runSemak(); });
+    $('#btnToLatihan').addEventListener('click', () => { if (LAST && window.Latihan) { show('latihan'); window.Latihan.loadOwn(LAST.verses[0]); } });
+    $('#inText').addEventListener('input', updateStat);
+    $('#inText').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runSemak(); });
+    $('#saveForm').addEventListener('submit', onSave);
+    $('#btnBankOnly').addEventListener('click', onBankOnly);
+    $('#rujForm').addEventListener('submit', onRujAdd);
+    ['#fRTahun', '#fRBahar', '#fRLaqob'].forEach(s => $(s).addEventListener('change', renderRekod));
+    $('#fRCari').addEventListener('input', renderRekod);
+    ['#fBBahar', '#fBLaqob', '#fBStatus'].forEach(s => $(s).addEventListener('change', renderBank));
+    $('#fTBahar').addEventListener('change', renderRuj);
+    $('#btnGuru').addEventListener('click', () => { if (ROLE === 'guru') lock(); else openPin(); });
+    $('#pinCancel').addEventListener('click', () => $('#pinPanel').close());
+    $('#pinForm').addEventListener('submit', async e => {
+      e.preventDefault(); const pin = $('#pinInput').value.trim(); if (!pin) return;
+      if (await unlock(pin)) $('#pinPanel').close(); else { $('#pinInput').select(); }
+    });
+    $$('[data-theme-set]').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.themeSet, true)));
+    setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'gelap' : 'cerah', false);
+    call('getBootData').then(init).catch(err => { $('#loading').textContent = 'Gagal memuatkan data: ' + err.message; });
+  });
+
+  // API kongsi untuk modul Latihan
+  function sortSets(list) {
+    const n = x => { const v = Number(x.Susunan); return x.Susunan === '' || x.Susunan == null || !isFinite(v) || v <= 0 ? Infinity : v; };
+    return (list || []).slice().sort((a, b) => (n(a) - n(b)) || String(a.Dicipta || '').localeCompare(String(b.Dicipta || '')) || String(a.ID).localeCompare(String(b.ID)));
+  }
+  window.ArudApp = { sortSets, get D() { return D; }, get ROLE() { return ROLE; }, esc, call, toast, parseVerses, renderPoem, describe, cleanZ, masculine, FORM_NAME, BAHAR, BAHAR_AR, LAQOB, fillSelect, norm, show };
+})();
+
+</script>
