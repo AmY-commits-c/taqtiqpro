@@ -5,7 +5,7 @@
  * Fail ini menggantikan `google.script.run`, jadi kod App/Latihan/Sets/Akses
  * tidak perlu diubah langsung.
  */
-const GAS_URL = 'TAMPAL_URL_WEB_APP_DI_SINI';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbwycr5v8vcnLGY4rzJjocGzTgyCd48enXVJA5SFQ6e7akHwgTRfBYKyO9bnjPTwfSHQ/exec';
 
 (function () {
   function hantar(fn, args, ok, fail) {
