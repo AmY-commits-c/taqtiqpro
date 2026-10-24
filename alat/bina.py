@@ -37,7 +37,8 @@ if "<title>" not in html:
     )
 
 # api.js mesti dimuat sebelum App/Latihan/Sets/Akses
-html = html.replace("</head>", '<script src="api.js"></script>\n</head>', 1)
+import time
+html = html.replace("</head>", f'<script src="api.js?v={int(time.time())}"></script>\n</head>', 1)
 
 (SINI / "index.html").write_text(html, encoding="utf-8")
 print(f"index.html siap ({n} fail digabungkan, {len(html)//1024} KB).")
